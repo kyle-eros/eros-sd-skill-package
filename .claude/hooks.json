@@ -1,0 +1,40 @@
+{
+  "version": "1.0.0",
+  "description": "Claude Code Hooks for EROS Self-Improving Skills System",
+  "hooks": {
+    "session_end": {
+      "enabled": true,
+      "trigger": "session_end",
+      "condition": "env.AUTO_REFLECT == 'true'",
+      "command": "reflect",
+      "description": "Auto-reflect when Claude Code session ends. Triggers skill reflection process to capture learnings, update skill confidence scores, and identify improvement opportunities. Toggleable via AUTO_REFLECT environment variable.",
+      "timeout_seconds": 120,
+      "on_failure": "warn"
+    },
+    "schedule_generated": {
+      "enabled": true,
+      "trigger": "command_success",
+      "pattern": "eros:generate*",
+      "condition": "result.success == true",
+      "command": "python -m feedback capture_validation",
+      "description": "Capture validation feedback after successful schedule generation. Records validation results, error patterns, and success metrics to inform future skill improvements.",
+      "timeout_seconds": 60,
+      "on_failure": "warn"
+    },
+    "weekly_performance": {
+      "enabled": true,
+      "trigger": "schedule",
+      "schedule": "0 9 * * 1",
+      "command": "python -m performance_tracker batch_collect",
+      "description": "Batch performance feedback collection. Runs every Monday at 9 AM to aggregate weekly performance metrics, identify trends, and update skill evolution recommendations.",
+      "timeout_seconds": 300,
+      "on_failure": "log"
+    }
+  },
+  "settings": {
+    "log_hook_execution": true,
+    "log_path": ".claude/hooks.log",
+    "max_concurrent_hooks": 1,
+    "default_timeout_seconds": 60
+  }
+}

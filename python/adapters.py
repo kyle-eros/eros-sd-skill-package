@@ -1,0 +1,144 @@
+"""EROS v1.0 Production Adapters for MCP and Task Tool (<150 lines).
+
+Connects v1.0 orchestrator to:
+1. Real MCP server (via existing client)
+2. Real Task tool (Claude Code sub-agents)
+
+Includes:
+- Retry logic with exponential backoff
+- Timeout handling
+- Request/response logging
+"""
+from __future__ import annotations
+import asyncio, functools, logging, time, uuid
+from dataclasses import dataclass
+from typing import Any, Callable, TypeVar
+
+logger = logging.getLogger("eros.adapters")
+T = TypeVar("T")
+
+@dataclass(frozen=True, slots=True)
+class RetryConfig:
+    max_retries: int = 3
+    base_delay: float = 1.0
+    max_delay: float = 30.0
+    exponential_base: float = 2.0
+    timeout: float = 120.0
+
+def with_retry(config: RetryConfig = None):
+    """Decorator for retry with exponential backoff."""
+    cfg = config or RetryConfig()
+    def decorator(func: Callable[..., T]) -> Callable[..., T]:
+        @functools.wraps(func)
+        async def wrapper(*args, **kwargs) -> T:
+            last_exc = None
+            for attempt in range(cfg.max_retries + 1):
+                try:
+                    return await asyncio.wait_for(func(*args, **kwargs), timeout=cfg.timeout)
+                except asyncio.TimeoutError as e:
+                    last_exc = e
+                    logger.warning(f"{func.__name__} timeout (attempt {attempt + 1}/{cfg.max_retries + 1})")
+                except Exception as e:
+                    last_exc = e
+                    if attempt == cfg.max_retries: break
+                    delay = min(cfg.base_delay * (cfg.exponential_base ** attempt), cfg.max_delay)
+                    logger.warning(f"{func.__name__} failed (attempt {attempt + 1}), retry in {delay:.1f}s: {e}")
+                    await asyncio.sleep(delay)
+            raise last_exc or RuntimeError("Retry exhausted")
+        return wrapper
+    return decorator
+
+class ProductionMCPClient:
+    """Wraps existing MCP client to match v1.0 Protocol with retry and logging."""
+
+    def __init__(self, mcp_tools: Any, retry_config: RetryConfig = None):
+        """Initialize with existing MCP tools object (Claude Code mcp__eros-db__ namespace)."""
+        self._mcp = mcp_tools
+        self._cfg = retry_config or RetryConfig()
+        self._call_count = 0
+
+    def _log_call(self, method: str, args: dict, result: Any, duration_ms: float) -> None:
+        self._call_count += 1
+        trace_id = uuid.uuid4().hex[:8]
+        logger.debug(f"MCP[{trace_id}] {method}({args}) -> {len(str(result))} chars in {duration_ms:.0f}ms")
+
+    async def _call(self, method: str, **kwargs) -> dict:
+        start = time.time()
+        fn = getattr(self._mcp, method, None)
+        if not fn: raise AttributeError(f"MCP method not found: {method}")
+        result = await fn(**kwargs) if asyncio.iscoroutinefunction(fn) else fn(**kwargs)
+        self._log_call(method, kwargs, result, (time.time() - start) * 1000)
+        return result if isinstance(result, dict) else {"data": result}
+
+    @with_retry()
+    async def get_creator_profile(self, creator_id: str) -> dict:
+        return await self._call("get_creator_profile", creator_id=creator_id)
+
+    @with_retry()
+    async def get_volume_config(self, creator_id: str, week_start: str) -> dict:
+        return await self._call("get_volume_config", creator_id=creator_id, week_start=week_start)
+
+    @with_retry()
+    async def get_vault_availability(self, creator_id: str) -> dict:
+        return await self._call("get_vault_availability", creator_id=creator_id)
+
+    @with_retry()
+    async def get_content_type_rankings(self, creator_id: str) -> dict:
+        return await self._call("get_content_type_rankings", creator_id=creator_id)
+
+    @with_retry()
+    async def get_persona_profile(self, creator_id: str) -> dict:
+        return await self._call("get_persona_profile", creator_id=creator_id)
+
+    @with_retry()
+    async def get_active_volume_triggers(self, creator_id: str) -> dict:
+        return await self._call("get_active_volume_triggers", creator_id=creator_id)
+
+    @with_retry()
+    async def get_performance_trends(self, creator_id: str, period: str = "14d") -> dict:
+        return await self._call("get_performance_trends", creator_id=creator_id, period=period)
+
+    @with_retry(RetryConfig(max_retries=1, timeout=60.0))  # Save has stricter timeout
+    async def save_schedule(self, creator_id: str, week_start: str, items: list,
+                            validation_certificate: dict | None = None) -> dict:
+        return await self._call("save_schedule", creator_id=creator_id, week_start=week_start,
+                                items=items, validation_certificate=validation_certificate or {})
+
+    @property
+    def call_count(self) -> int: return self._call_count
+
+class ProductionTaskTool:
+    """Wraps Claude Code task invocation for v1.0 agents."""
+
+    def __init__(self, task_invoker: Callable, retry_config: RetryConfig = None):
+        """Initialize with task invocation function (Task tool from Claude Code)."""
+        self._invoke = task_invoker
+        self._cfg = retry_config or RetryConfig(timeout=300.0)  # Agents need longer timeout
+
+    @with_retry(RetryConfig(max_retries=2, timeout=300.0))
+    async def invoke(self, subagent_type: str, prompt: str, model: str = "sonnet") -> dict:
+        """Invoke a sub-agent and parse JSON response."""
+        start = time.time()
+        logger.info(f"TaskTool invoking {subagent_type} ({model})")
+        result = await self._invoke(subagent_type=subagent_type, prompt=prompt, model=model)
+        duration_ms = (time.time() - start) * 1000
+        logger.info(f"TaskTool {subagent_type} completed in {duration_ms:.0f}ms")
+        # Parse JSON from agent response if needed
+        if isinstance(result, str):
+            import json
+            try:
+                # Find JSON in response
+                start_idx = result.find("{")
+                end_idx = result.rfind("}") + 1
+                if start_idx >= 0 and end_idx > start_idx:
+                    return json.loads(result[start_idx:end_idx])
+            except json.JSONDecodeError:
+                pass
+            return {"raw_response": result}
+        return result if isinstance(result, dict) else {"data": result}
+
+def create_production_adapters(mcp_tools: Any, task_invoker: Callable) -> tuple[ProductionMCPClient, ProductionTaskTool]:
+    """Factory function to create production adapters."""
+    return ProductionMCPClient(mcp_tools), ProductionTaskTool(task_invoker)
+
+__all__ = ["ProductionMCPClient", "ProductionTaskTool", "RetryConfig", "with_retry", "create_production_adapters"]
