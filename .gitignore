@@ -49,3 +49,27 @@ htmlcov/
 # Claude Code
 .claude/settings.local.json
 CLAUDE.local.md
+
+# MCP Configuration (environment-specific)
+.mcp.json
+
+# Database files (EROS MCP)
+data/*.db
+data/*.db-journal
+data/*.db-wal
+data/*.db-shm
+
+# MCP Setup Artifacts
+mcp-audit-report.md
+mcp-validation-report.md
+data/schema-*.txt
+data/schema-*.sql
+data/record-counts.txt
+data/db-config.json
+
+# MCP Server cache
+mcp_server/__pycache__/
+mcp_server/*.pyc
+
+# Archives
+archived/

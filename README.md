@@ -73,8 +73,43 @@ Every schedule generation captures feedback:
 
 Run `/reflect` to consolidate learnings into SKILL.md.
 
+## MCP Server
+
+The skill uses an MCP server (`eros-db`) for database access.
+
+### Quick Start
+
+1. Ensure database exists at `./data/eros_sd_main.db`
+2. Restart Claude Code
+3. Verify connection: `/mcp status`
+
+### Available Tools (14)
+
+| Category | Tools | Purpose |
+|----------|-------|---------|
+| Creator | 5 | Profiles, vault, rankings, personas |
+| Schedule | 5 | Volume config, triggers, persistence |
+| Caption | 3 | Batch retrieval, validation |
+| Config | 1 | 22-type send taxonomy |
+
+### Verifying Setup
+
+```bash
+# Check MCP status
+/mcp status
+
+# List tools
+/mcp tools eros-db
+
+# Test tool
+/mcp call eros-db get_active_creators --limit 5
+```
+
+See [MCP Setup Guide](docs/MCP_SETUP_GUIDE.md) for troubleshooting and detailed configuration.
+
 ## Documentation
 
+- [MCP Setup Guide](docs/MCP_SETUP_GUIDE.md) - MCP server configuration
 - [Domain Knowledge](docs/DOMAIN_KNOWLEDGE.md) - Business rules
 - [Architecture](docs/ARCHITECTURE_DECISION_RECORD.md) - System design
 - [Self-Improving Skills](docs/SELF_IMPROVING_SKILLS.md) - Learning protocol

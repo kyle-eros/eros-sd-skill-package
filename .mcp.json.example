@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "eros-db": {
+      "type": "stdio",
+      "command": "python3",
+      "args": ["-m", "mcp_server.main"],
+      "env": {
+        "EROS_DB_PATH": "./data/eros_sd_main.db",
+        "LOG_LEVEL": "info",
+        "PYTHONPATH": "."
+      },
+      "timeout": 30000
+    }
+  }
+}

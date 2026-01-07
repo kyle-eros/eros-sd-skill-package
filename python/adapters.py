@@ -49,7 +49,12 @@ def with_retry(config: RetryConfig = None):
     return decorator
 
 class ProductionMCPClient:
-    """Wraps existing MCP client to match v1.0 Protocol with retry and logging."""
+    """Wraps existing MCP client to match v1.0 Protocol with retry and logging.
+
+    MCP Server: eros-db
+    Tool Naming: mcp__eros-db__<tool-name>
+    Total Tools: 14
+    """
 
     def __init__(self, mcp_tools: Any, retry_config: RetryConfig = None):
         """Initialize with existing MCP tools object (Claude Code mcp__eros-db__ namespace)."""
@@ -70,39 +75,96 @@ class ProductionMCPClient:
         self._log_call(method, kwargs, result, (time.time() - start) * 1000)
         return result if isinstance(result, dict) else {"data": result}
 
-    @with_retry()
-    async def get_creator_profile(self, creator_id: str) -> dict:
-        return await self._call("get_creator_profile", creator_id=creator_id)
+    # ============================================================
+    # CREATOR TOOLS (5)
+    # ============================================================
 
     @with_retry()
-    async def get_volume_config(self, creator_id: str, week_start: str) -> dict:
-        return await self._call("get_volume_config", creator_id=creator_id, week_start=week_start)
+    async def get_creator_profile(self, creator_id: str, include_analytics: bool = False) -> dict:
+        """MCP: mcp__eros-db__get_creator_profile"""
+        return await self._call("get_creator_profile", creator_id=creator_id, include_analytics=include_analytics)
+
+    @with_retry()
+    async def get_active_creators(self, limit: int = 100, tier: str = None) -> dict:
+        """MCP: mcp__eros-db__get_active_creators"""
+        return await self._call("get_active_creators", limit=limit, tier=tier)
 
     @with_retry()
     async def get_vault_availability(self, creator_id: str) -> dict:
+        """MCP: mcp__eros-db__get_vault_availability (HARD GATE)"""
         return await self._call("get_vault_availability", creator_id=creator_id)
 
     @with_retry()
     async def get_content_type_rankings(self, creator_id: str) -> dict:
+        """MCP: mcp__eros-db__get_content_type_rankings (HARD GATE)"""
         return await self._call("get_content_type_rankings", creator_id=creator_id)
 
     @with_retry()
     async def get_persona_profile(self, creator_id: str) -> dict:
+        """MCP: mcp__eros-db__get_persona_profile"""
         return await self._call("get_persona_profile", creator_id=creator_id)
+
+    # ============================================================
+    # SCHEDULE TOOLS (5)
+    # ============================================================
+
+    @with_retry()
+    async def get_volume_config(self, creator_id: str, week_start: str) -> dict:
+        """MCP: mcp__eros-db__get_volume_config"""
+        return await self._call("get_volume_config", creator_id=creator_id, week_start=week_start)
 
     @with_retry()
     async def get_active_volume_triggers(self, creator_id: str) -> dict:
+        """MCP: mcp__eros-db__get_active_volume_triggers"""
         return await self._call("get_active_volume_triggers", creator_id=creator_id)
 
     @with_retry()
     async def get_performance_trends(self, creator_id: str, period: str = "14d") -> dict:
+        """MCP: mcp__eros-db__get_performance_trends"""
         return await self._call("get_performance_trends", creator_id=creator_id, period=period)
 
     @with_retry(RetryConfig(max_retries=1, timeout=60.0))  # Save has stricter timeout
     async def save_schedule(self, creator_id: str, week_start: str, items: list,
                             validation_certificate: dict | None = None) -> dict:
+        """MCP: mcp__eros-db__save_schedule"""
         return await self._call("save_schedule", creator_id=creator_id, week_start=week_start,
                                 items=items, validation_certificate=validation_certificate or {})
+
+    @with_retry(RetryConfig(max_retries=1, timeout=60.0))
+    async def save_volume_triggers(self, creator_id: str, triggers: list) -> dict:
+        """MCP: mcp__eros-db__save_volume_triggers"""
+        return await self._call("save_volume_triggers", creator_id=creator_id, triggers=triggers)
+
+    # ============================================================
+    # CAPTION TOOLS (3)
+    # ============================================================
+
+    @with_retry()
+    async def get_batch_captions_by_content_types(self, creator_id: str, content_types: list,
+                                                   limit_per_type: int = 5) -> dict:
+        """MCP: mcp__eros-db__get_batch_captions_by_content_types"""
+        return await self._call("get_batch_captions_by_content_types", creator_id=creator_id,
+                                content_types=content_types, limit_per_type=limit_per_type)
+
+    @with_retry()
+    async def get_send_type_captions(self, creator_id: str, send_type: str, limit: int = 10) -> dict:
+        """MCP: mcp__eros-db__get_send_type_captions"""
+        return await self._call("get_send_type_captions", creator_id=creator_id,
+                                send_type=send_type, limit=limit)
+
+    @with_retry()
+    async def validate_caption_structure(self, caption_text: str, send_type: str) -> dict:
+        """MCP: mcp__eros-db__validate_caption_structure"""
+        return await self._call("validate_caption_structure", caption_text=caption_text, send_type=send_type)
+
+    # ============================================================
+    # CONFIG TOOLS (1)
+    # ============================================================
+
+    @with_retry()
+    async def get_send_types(self, page_type: str = None) -> dict:
+        """MCP: mcp__eros-db__get_send_types"""
+        return await self._call("get_send_types", page_type=page_type)
 
     @property
     def call_count(self) -> int: return self._call_count

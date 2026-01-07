@@ -1,8 +1,8 @@
 ---
 name: eros-schedule-generator
 description: Generate optimized weekly schedules for OnlyFans creators. Invoke PROACTIVELY for schedule generation, PPV optimization, or content planning requests.
-version: 5.1.0
-allowed-tools: get_creator_profile, get_volume_config, get_vault_availability, get_content_type_rankings, get_persona_profile, get_active_volume_triggers, get_performance_trends, get_batch_captions_by_content_types, get_send_type_captions, save_schedule, save_volume_triggers
+version: 5.2.0
+allowed-tools: mcp__eros-db__get_creator_profile, mcp__eros-db__get_volume_config, mcp__eros-db__get_vault_availability, mcp__eros-db__get_content_type_rankings, mcp__eros-db__get_persona_profile, mcp__eros-db__get_active_volume_triggers, mcp__eros-db__get_performance_trends, mcp__eros-db__get_batch_captions_by_content_types, mcp__eros-db__get_send_type_captions, mcp__eros-db__save_schedule, mcp__eros-db__save_volume_triggers, mcp__eros-db__get_active_creators, mcp__eros-db__validate_caption_structure, mcp__eros-db__get_send_types
 triggers:
   - generate schedule
   - weekly schedule
@@ -33,6 +33,58 @@ Step 3 - LOAD REFERENCES: Based on task, read relevant files:
 
 **CRITICAL**: The evaluation is WORTHLESS unless you LOAD the learnings.
 Skipping Step 2 will repeat past mistakes.
+
+---
+
+## MCP Server: eros-db
+
+This skill uses the `eros-db` MCP server for database access.
+
+**Tool Naming**: All tools use format `mcp__eros-db__<tool-name>`
+
+### Verify MCP Connection
+Before using tools:
+1. Run `/mcp status`
+2. Confirm `eros-db` shows as "connected"
+3. If not connected, restart Claude Code session
+
+### Available Tools (14 total)
+
+| Tool | Category | Description | GATE |
+|------|----------|-------------|------|
+| `mcp__eros-db__get_creator_profile` | Creator | Profile with analytics | |
+| `mcp__eros-db__get_active_creators` | Creator | List active creators | |
+| `mcp__eros-db__get_vault_availability` | Creator | Content type availability | HARD |
+| `mcp__eros-db__get_content_type_rankings` | Creator | Performance tiers | HARD |
+| `mcp__eros-db__get_persona_profile` | Creator | Tone/archetype settings | |
+| `mcp__eros-db__get_volume_config` | Schedule | Tier and daily volumes | |
+| `mcp__eros-db__get_active_volume_triggers` | Schedule | Performance triggers | |
+| `mcp__eros-db__get_performance_trends` | Schedule | Health/saturation metrics | |
+| `mcp__eros-db__save_schedule` | Schedule | Persist with certificate | |
+| `mcp__eros-db__save_volume_triggers` | Schedule | Persist triggers | |
+| `mcp__eros-db__get_batch_captions_by_content_types` | Caption | Batch PPV retrieval | |
+| `mcp__eros-db__get_send_type_captions` | Caption | Send-type specific | |
+| `mcp__eros-db__validate_caption_structure` | Caption | Anti-patterization | |
+| `mcp__eros-db__get_send_types` | Config | 22-type taxonomy | |
+
+### Tool Usage by Phase
+
+**Phase 1 - Preflight** (5 tools):
+- `mcp__eros-db__get_creator_profile` - Creator metadata
+- `mcp__eros-db__get_volume_config` - Volume tier configuration
+- `mcp__eros-db__get_vault_availability` - HARD GATE data
+- `mcp__eros-db__get_content_type_rankings` - HARD GATE data
+- `mcp__eros-db__get_persona_profile` - Caption styling
+
+**Phase 2 - Generate** (3 tools):
+- `mcp__eros-db__get_batch_captions_by_content_types` - PPV captions
+- `mcp__eros-db__get_send_type_captions` - Engagement captions
+- `mcp__eros-db__validate_caption_structure` - Quality check
+
+**Phase 3 - Validate** (3 tools):
+- `mcp__eros-db__get_vault_availability` - Re-verify HARD GATE
+- `mcp__eros-db__get_content_type_rankings` - Re-verify HARD GATE
+- `mcp__eros-db__save_schedule` - Persist with certificate
 
 ---
 
@@ -73,15 +125,15 @@ python python/preflight.py --creator grace_bennett --week 2026-01-06
 
 | Field | Type | Source MCP Tool |
 |-------|------|-----------------|
-| `creator_id` | string | `get_creator_profile` |
-| `page_type` | "paid" \| "free" | `get_creator_profile` |
-| `vault_types` | string[] | `get_vault_availability` |
-| `avoid_types` | string[] | `get_content_type_rankings` |
-| `top_content_types` | {type, tier}[] | `get_content_type_rankings` |
-| `volume_config` | VolumeConfig | `get_volume_config` |
-| `persona` | Persona | `get_persona_profile` |
-| `active_triggers` | Trigger[] | `get_active_volume_triggers` |
-| `pricing_config` | PricingConfig | `get_creator_profile` |
+| `creator_id` | string | `mcp__eros-db__get_creator_profile` |
+| `page_type` | "paid" \| "free" | `mcp__eros-db__get_creator_profile` |
+| `vault_types` | string[] | `mcp__eros-db__get_vault_availability` |
+| `avoid_types` | string[] | `mcp__eros-db__get_content_type_rankings` |
+| `top_content_types` | {type, tier}[] | `mcp__eros-db__get_content_type_rankings` |
+| `volume_config` | VolumeConfig | `mcp__eros-db__get_volume_config` |
+| `persona` | Persona | `mcp__eros-db__get_persona_profile` |
+| `active_triggers` | Trigger[] | `mcp__eros-db__get_active_volume_triggers` |
+| `pricing_config` | PricingConfig | `mcp__eros-db__get_creator_profile` |
 
 ### VolumeConfig Shape
 
@@ -155,27 +207,28 @@ python python/preflight.py --creator grace_bennett --week 2026-01-06
 
 | Tool | Purpose |
 |------|---------|
-| `get_creator_profile` | Creator data + analytics |
-| `get_volume_config` | Tier + daily volumes + DOW distribution |
-| `get_vault_availability` | Available content types (HARD GATE) |
-| `get_content_type_rankings` | TOP/MID/LOW/AVOID tiers (HARD GATE) |
-| `get_persona_profile` | Tone, archetype, voice |
-| `get_active_volume_triggers` | Performance-based adjustments |
+| `mcp__eros-db__get_creator_profile` | Creator data + analytics |
+| `mcp__eros-db__get_volume_config` | Tier + daily volumes + DOW distribution |
+| `mcp__eros-db__get_vault_availability` | Available content types (HARD GATE) |
+| `mcp__eros-db__get_content_type_rankings` | TOP/MID/LOW/AVOID tiers (HARD GATE) |
+| `mcp__eros-db__get_persona_profile` | Tone, archetype, voice |
+| `mcp__eros-db__get_active_volume_triggers` | Performance-based adjustments |
 
-### Phase 2: Generator (2 tools)
+### Phase 2: Generator (3 tools)
 
 | Tool | Purpose |
 |------|---------|
-| `get_batch_captions_by_content_types` | Batch PPV caption retrieval |
-| `get_send_type_captions` | Send-type specific captions |
+| `mcp__eros-db__get_batch_captions_by_content_types` | Batch PPV caption retrieval |
+| `mcp__eros-db__get_send_type_captions` | Send-type specific captions |
+| `mcp__eros-db__validate_caption_structure` | Caption quality validation |
 
 ### Phase 3: Validator (3 tools)
 
 | Tool | Purpose |
 |------|---------|
-| `get_vault_availability` | Re-verify vault compliance |
-| `get_content_type_rankings` | Re-verify AVOID exclusion |
-| `save_schedule` | Persist with ValidationCertificate |
+| `mcp__eros-db__get_vault_availability` | Re-verify vault compliance |
+| `mcp__eros-db__get_content_type_rankings` | Re-verify AVOID exclusion |
+| `mcp__eros-db__save_schedule` | Persist with ValidationCertificate |
 
 ---
 
