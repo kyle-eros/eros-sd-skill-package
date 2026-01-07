@@ -1,6 +1,6 @@
 # EROS MCP Setup Guide
 
-**Version**: 1.0.0
+**Version**: 1.1.0
 **Last Updated**: 2026-01-06
 **Server**: eros-db
 
@@ -19,7 +19,7 @@ The EROS Schedule Generator uses an MCP server (`eros-db`) to access the SQLite 
 | File | Purpose |
 |------|---------|
 | `.mcp.json` | MCP server configuration |
-| `./mcp_server/main.py` | Server implementation (14 tools) |
+| `./mcp_server/main.py` | Server implementation (15 tools) |
 | `./mcp_server/__init__.py` | Package initialization |
 | `./data/eros_sd_main.db` | SQLite database |
 | `./data/db-config.json` | Database configuration |
@@ -36,14 +36,14 @@ The EROS Schedule Generator uses an MCP server (`eros-db`) to access the SQLite 
 ```
 /mcp tools eros-db
 ```
-**Expected**: All 14 tools listed
+**Expected**: All 15 tools listed
 
 ### 3. Test Tool Call
 ```
 /mcp call eros-db get_active_creators --limit 5
 ```
 
-## Available Tools (14 total)
+## Available Tools (15 total)
 
 ### Creator Tools (5)
 
@@ -73,11 +73,12 @@ The EROS Schedule Generator uses an MCP server (`eros-db`) to access the SQLite 
 | `get_send_type_captions` | Captions by send type category |
 | `validate_caption_structure` | Anti-patterization validation |
 
-### Config Tools (1)
+### Config Tools (2)
 
 | Tool | Description |
 |------|-------------|
-| `get_send_types` | 22-type taxonomy with constraints |
+| `get_send_types` | 22-type taxonomy with constraints (full details) |
+| `get_send_types_constraints` | Lightweight constraints for schedule generation (**preferred**) |
 
 ## Tool Usage by Phase
 
@@ -170,7 +171,7 @@ mcp__eros-db__save_schedule
 2. **Verify tool exists:**
    ```bash
    grep "@mcp.tool()" ./mcp_server/main.py | wc -l
-   # Should return 14
+   # Should return 15
    ```
 
 3. **Test individual tool:**
@@ -237,7 +238,32 @@ Key tables:
 | `mass_messages` | Historical performance data |
 | `personas` | Creator voice/tone settings |
 
+## Tool Optimization Guide
+
+### Send Types Tools Comparison
+
+| Tool | Tokens | Fields | Use Case |
+|------|--------|--------|----------|
+| `get_send_types` | ~14,600 | 53 | Full details (rare) |
+| `get_send_types_constraints` | ~2,000 | 9 | **Schedule generation (always use)** |
+
+**Token Savings: 86% reduction (~12,500 tokens saved per call)**
+
+### When to Use Each Tool
+
+**get_send_types_constraints** (preferred):
+- Schedule generation workflows
+- Constraint validation
+- Volume allocation decisions
+- Any context-sensitive operations
+
+**get_send_types** (full version):
+- Debugging send type configurations
+- Viewing descriptions, strategies, purposes
+- Channel configuration analysis
+- Weight/scoring adjustments
+
 ---
 
 *EROS Schedule Generator MCP Documentation*
-*Server: eros-db | Tools: 14 | MCP Spec: 2025-11-25*
+*Server: eros-db | Tools: 15 | MCP Spec: 2025-11-25*

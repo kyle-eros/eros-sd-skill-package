@@ -2,7 +2,7 @@
 
 Provides database access tools for the EROS Schedule Generator.
 Server: eros-db
-Tools: 14 total
+Tools: 15 total
 
 Tool Categories:
   - Creator (5): get_creator_profile, get_active_creators, get_vault_availability,
@@ -11,7 +11,11 @@ Tool Categories:
                   save_schedule, save_volume_triggers
   - Caption (3): get_batch_captions_by_content_types, get_send_type_captions,
                  validate_caption_structure
-  - Config (1): get_send_types
+  - Config (2): get_send_types, get_send_types_constraints
+
+Optimization Note:
+  Use get_send_types_constraints for schedule generation (~2k tokens).
+  Use get_send_types only when full details needed (~14.6k tokens).
 """
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 __server_name__ = "eros-db"

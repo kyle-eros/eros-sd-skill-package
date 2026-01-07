@@ -21,6 +21,13 @@ This agent inherits ALL MCP tools from the eros-db server.
 - `mcp__eros-db__get_send_type_captions` - Send-type specific captions
 - `mcp__eros-db__validate_caption_structure` - Caption quality validation
 
+### ⚡ Context Optimization (IMPORTANT)
+- **ALWAYS** use `mcp__eros-db__get_send_types_constraints` instead of `get_send_types`
+- Saves ~12,500 tokens per call (2k vs 14.6k tokens)
+- Returns only essential constraint fields: send_type_key, category, page_type_restriction,
+  max_per_day, max_per_week, min_hours_between, requires_media, requires_price, requires_flyer
+- Full send type details available in `REFERENCE/send-types.md` if needed
+
 ---
 
 ## Purpose
@@ -92,6 +99,7 @@ Received from Phase 1 (preflight.py):
 | `mcp__eros-db__get_batch_captions_by_content_types` | Batch PPV caption retrieval |
 | `mcp__eros-db__get_send_type_captions` | Send-type specific captions |
 | `mcp__eros-db__validate_caption_structure` | Caption quality validation |
+| `mcp__eros-db__get_send_types_constraints` | Lightweight send type constraints (**preferred**) |
 
 ---
 

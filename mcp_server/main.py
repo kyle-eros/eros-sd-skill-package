@@ -5,14 +5,14 @@ MCP Specification: 2025-11-25
 Server Name: eros-db
 Tool Naming Convention: mcp__eros-db__<tool-name>
 
-Tools (14 total):
+Tools (15 total):
   Creator (5): get_creator_profile, get_active_creators, get_vault_availability,
                get_content_type_rankings, get_persona_profile
   Schedule (5): get_volume_config, get_active_volume_triggers, get_performance_trends,
                 save_schedule, save_volume_triggers
   Caption (3): get_batch_captions_by_content_types, get_send_type_captions,
                validate_caption_structure
-  Config (1): get_send_types
+  Config (2): get_send_types_constraints (lightweight), get_send_types (full)
 
 IMPORTANT: This server uses ACTUAL table names from the database:
   - caption_bank (not captions)
@@ -943,8 +943,81 @@ def validate_caption_structure(caption_text: str, send_type: str) -> dict:
 
 
 # ============================================================
-# CONFIG TOOLS (1)
+# CONFIG TOOLS (2)
 # ============================================================
+
+@mcp.tool()
+def get_send_types_constraints(page_type: str = None) -> dict:
+    """Returns minimal send type constraints for schedule generation.
+
+    MCP Name: mcp__eros-db__get_send_types_constraints
+
+    This is the PREFERRED tool for schedule generation. Returns only 9 essential
+    fields instead of 53, reducing response from ~34k chars to ~6k chars (~80% reduction).
+
+    Use full get_send_types() only when you need description, strategy, weights,
+    channel configs, or other detailed fields.
+
+    Args:
+        page_type: Optional filter ('paid' or 'free')
+
+    Returns:
+        Minimal send type data with scheduling constraints only:
+        - send_type_key, category, page_type_restriction
+        - max_per_day, max_per_week, min_hours_between
+        - requires_media, requires_price, requires_flyer
+    """
+    logger.info(f"get_send_types_constraints: page_type={page_type}")
+    try:
+        # Select ONLY the 9 essential fields for schedule generation
+        query = """
+            SELECT
+                send_type_key,
+                category,
+                page_type_restriction,
+                max_per_day,
+                max_per_week,
+                min_hours_between,
+                requires_media,
+                requires_price,
+                requires_flyer
+            FROM send_types
+            WHERE is_active = 1
+        """
+
+        if page_type == 'free':
+            query += " AND page_type_restriction IN ('both', 'free')"
+        elif page_type == 'paid':
+            query += " AND page_type_restriction IN ('both', 'paid')"
+
+        query += " ORDER BY category, sort_order"
+
+        types = db_query(query, tuple())
+
+        # Group by category for easy lookup
+        by_category = {
+            "revenue": [],
+            "engagement": [],
+            "retention": []
+        }
+        for t in types:
+            cat = t.get('category', 'engagement').lower()
+            if cat in by_category:
+                by_category[cat].append(t)
+
+        return {
+            "send_types": types,
+            "by_category": by_category,
+            "total": len(types),
+            "page_type_filter": page_type,
+            "fields_returned": 9,
+            "_optimization_note": "Lightweight view (9 fields vs 53). Use get_send_types for full details."
+        }
+
+    except Exception as e:
+        logger.error(f"get_send_types_constraints error: {e}")
+        return {"error": str(e), "send_types": []}
+
 
 @mcp.tool()
 def get_send_types(page_type: str = None) -> dict:

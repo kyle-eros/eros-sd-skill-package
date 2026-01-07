@@ -43,7 +43,7 @@ class CreatorContext:
     mcp_calls_made: int = 0
 
 class MCPClient(Protocol):
-    """Protocol for MCP client - matches eros-db server tools (14 total)."""
+    """Protocol for MCP client - matches eros-db server tools (15 total)."""
 
     # Creator tools (5)
     async def get_creator_profile(self, creator_id: str, include_analytics: bool = False) -> dict: ...
@@ -64,8 +64,11 @@ class MCPClient(Protocol):
     async def get_send_type_captions(self, creator_id: str, send_type: str, limit: int = 10) -> dict: ...
     async def validate_caption_structure(self, caption_text: str, send_type: str) -> dict: ...
 
-    # Config tools (1)
+    # Config tools (2)
     async def get_send_types(self, page_type: str = None) -> dict: ...
+    async def get_send_types_constraints(self, page_type: str = None) -> dict:
+        """Lightweight send types for schedule generation (9 fields, ~2k tokens)."""
+        ...
 
 class PreflightEngine:
     """Single-pass preflight generating CreatorContext. All logic deterministic."""
