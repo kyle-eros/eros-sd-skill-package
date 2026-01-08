@@ -209,7 +209,8 @@ class TestPreflightExecution:
         assert ctx.page_type == "paid"
         assert len(ctx.vault_types) > 0
         assert ctx.volume_config["tier"] in TIER_ORDER
-        assert ctx.mcp_calls_made == 7
+        # v1.1.0: Reduced from 7 to 4 MCP calls via bundled get_creator_profile
+        assert ctx.mcp_calls_made == 4
 
     async def test_execute_inactive_creator_fails(self):
         """Inactive creator raises ValueError."""

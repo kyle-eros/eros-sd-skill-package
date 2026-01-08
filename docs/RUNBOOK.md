@@ -25,7 +25,7 @@
          │         ▼                 │
          │  ┌──────────────┐         │
          │  │   Preflight  │◄────────┤
-         │  │  (7 MCP)     │         │
+         │  │  (4 MCP)     │         │
          │  └──────┬───────┘         │
          │         ▼                 │
          │  ┌──────────────┐         │
@@ -60,10 +60,12 @@
 ### Data Flow
 1. Request arrives at PipelineRouter
 2. Router decides v4 or v5 based on flags
-3. v5: Preflight fetches creator context (7 MCP calls)
+3. v5: Preflight fetches creator context (4 MCP calls via bundled `get_creator_profile`)
 4. v5: Generator creates schedule (Sonnet agent)
 5. v5: Validator checks hard gates (Opus agent)
 6. Schedule saved via MCP `save_schedule`
+
+> **Optimization Note (v1.1.0)**: Preflight reduced from 7 to 4 MCP calls (43% reduction) by bundling analytics, volume, and content rankings into `get_creator_profile`.
 
 ---
 

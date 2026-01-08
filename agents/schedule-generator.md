@@ -31,7 +31,7 @@ Build optimized weekly schedule items from CreatorContext. Select captions, assi
 
 ## Input: CreatorContext
 
-Received from Phase 1 (preflight.py):
+Received from Phase 1 (preflight.py) - now uses bundled `get_creator_profile` response (v1.1.0):
 
 ```json
 {
@@ -49,11 +49,21 @@ Received from Phase 1 (preflight.py):
     "bump_multiplier": 1.5,
     "calendar_boosts": [...]
   },
+  "analytics_summary": {
+    "mm_revenue_30d": 2500.00,
+    "mm_revenue_confidence": "high",
+    "mm_revenue_source": "posts_net + message_net",
+    "mm_data_age_days": 3,
+    "avg_rps": 145.00,
+    "avg_open_rate": 0.42
+  },
   "persona": {...},
   "active_triggers": [...],
   "pricing_config": {...}
 }
 ```
+
+> **Note**: `analytics_summary`, `volume_config`, `avoid_types`, and `top_content_types` are now bundled in the `get_creator_profile` response, reducing preflight MCP calls from 7 to 4.
 
 ---
 

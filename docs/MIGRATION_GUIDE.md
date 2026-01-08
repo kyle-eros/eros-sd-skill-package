@@ -11,13 +11,14 @@ This guide provides step-by-step instructions for migrating from EROS v4.0 to v1
 
 ### Architecture Changes
 
-| Aspect | v4.0 | v1.0 |
-|--------|------|------|
-| Orchestrator | 2,468 lines | 209 lines |
-| Pipeline phases | 10 | 3 |
-| LLM agents | 5 | 2 |
-| MCP calls | 50+ | ~10 |
-| Execution time | 3-5 min | 60-90s |
+| Aspect | v4.0 | v1.0 | v1.1.0 |
+|--------|------|------|--------|
+| Orchestrator | 2,468 lines | 209 lines | 209 lines |
+| Pipeline phases | 10 | 3 | 3 |
+| LLM agents | 5 | 2 | 2 |
+| MCP calls | 50+ | ~10 | ~8 (bundled) |
+| Preflight MCP calls | N/A | 7 | 4 |
+| Execution time | 3-5 min | 60-90s | 60-90s |
 
 ---
 

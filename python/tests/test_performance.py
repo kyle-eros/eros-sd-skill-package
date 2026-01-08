@@ -41,16 +41,17 @@ class TestPerformance:
         assert result.metrics["total_duration_ms"] < 5000
 
     async def test_mcp_call_count(self):
-        """Target: ~10 MCP calls (vs v4.0: 50+)."""
+        """Target: ~8 MCP calls (vs v4.0: 50+)."""
         mcp = MockMCPClient(TestDataFactory.STANDARD)
         task = MockTaskTool(quality_score=90)
 
         mcp.call_log.clear()
         await EROSOrchestrator(mcp, task).run("alexia", "2026-01-06")
 
-        # Preflight: 7 calls + save: 1 call = 8 total from orchestrator
+        # Preflight: 4 calls (bundled get_creator_profile) + save: 1 call = 5 total from orchestrator
         # Generator/validator agent calls tracked separately
-        assert len(mcp.call_log) <= 10, f"MCP calls: {len(mcp.call_log)}, target <= 10"
+        # v1.1.0: Reduced from 7 to 4 preflight calls via bundled get_creator_profile
+        assert len(mcp.call_log) <= 8, f"MCP calls: {len(mcp.call_log)}, target <= 8"
         print(f"\nMCP Calls Made: {len(mcp.call_log)}")
         print(f"Call Breakdown: {mcp.call_log}")
 

@@ -52,12 +52,12 @@ Before using tools:
 
 | Tool | Category | Description | GATE |
 |------|----------|-------------|------|
-| `mcp__eros-db__get_creator_profile` | Creator | Profile with analytics | |
+| `mcp__eros-db__get_creator_profile` | Creator | **Bundled**: Profile + analytics + volume + rankings | |
 | `mcp__eros-db__get_active_creators` | Creator | List active creators | |
 | `mcp__eros-db__get_vault_availability` | Creator | Content type availability | HARD |
-| `mcp__eros-db__get_content_type_rankings` | Creator | Performance tiers | HARD |
+| `mcp__eros-db__get_content_type_rankings` | Creator | Performance tiers (also in bundled) | HARD |
 | `mcp__eros-db__get_persona_profile` | Creator | Tone/archetype settings | |
-| `mcp__eros-db__get_volume_config` | Schedule | Tier and daily volumes | |
+| `mcp__eros-db__get_volume_config` | Schedule | Tier and daily volumes (also in bundled) | |
 | `mcp__eros-db__get_active_volume_triggers` | Schedule | Performance triggers | |
 | `mcp__eros-db__get_performance_trends` | Schedule | Health/saturation metrics | |
 | `mcp__eros-db__save_schedule` | Schedule | Persist with certificate | |
@@ -69,12 +69,11 @@ Before using tools:
 
 ### Tool Usage by Phase
 
-**Phase 1 - Preflight** (5 tools):
-- `mcp__eros-db__get_creator_profile` - Creator metadata
-- `mcp__eros-db__get_volume_config` - Volume tier configuration
+**Phase 1 - Preflight** (4 MCP calls via bundled response):
+- `mcp__eros-db__get_creator_profile` - **Bundled**: Profile + analytics + volume + rankings (replaces 3 separate calls)
 - `mcp__eros-db__get_vault_availability` - HARD GATE data
-- `mcp__eros-db__get_content_type_rankings` - HARD GATE data
 - `mcp__eros-db__get_persona_profile` - Caption styling
+- `mcp__eros-db__get_active_volume_triggers` - Performance triggers
 
 **Phase 2 - Generate** (3 tools):
 - `mcp__eros-db__get_batch_captions_by_content_types` - PPV captions
@@ -203,16 +202,16 @@ python python/preflight.py --creator grace_bennett --week 2026-01-06
 
 ## MCP Tools by Phase
 
-### Phase 1: Preflight (6 tools)
+### Phase 1: Preflight (4 MCP calls)
 
 | Tool | Purpose |
 |------|---------|
-| `mcp__eros-db__get_creator_profile` | Creator data + analytics |
-| `mcp__eros-db__get_volume_config` | Tier + daily volumes + DOW distribution |
+| `mcp__eros-db__get_creator_profile` | **Bundled**: Profile + analytics + volume + rankings (43% reduction from 7 to 4 calls) |
 | `mcp__eros-db__get_vault_availability` | Available content types (HARD GATE) |
-| `mcp__eros-db__get_content_type_rankings` | TOP/MID/LOW/AVOID tiers (HARD GATE) |
 | `mcp__eros-db__get_persona_profile` | Tone, archetype, voice |
 | `mcp__eros-db__get_active_volume_triggers` | Performance-based adjustments |
+
+> **Note**: `get_creator_profile` now includes `analytics_summary`, `volume_assignment`, `top_content_types`, `avoid_types`, and `top_types` by default. Set `include_analytics=False`, `include_volume=False`, or `include_content_rankings=False` to disable bundling.
 
 ### Phase 2: Generator (3 tools)
 

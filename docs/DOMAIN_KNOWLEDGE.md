@@ -429,7 +429,7 @@ Certificate must be < 5 minutes old at save_schedule time.
 | Tool | Category | Purpose |
 |------|----------|---------|
 | `get_active_creators` | Creator | List creators with metrics |
-| `get_creator_profile` | Creator | Full profile + analytics |
+| `get_creator_profile` | Creator | **Bundled**: Profile + analytics + volume + rankings (v1.1.0) |
 | `get_persona_profile` | Creator | Tone, archetype, voice |
 | `get_vault_availability` | Creator | Vault content types (HARD GATE) |
 | `get_send_type_captions` | Caption | Send-type compatible captions |
