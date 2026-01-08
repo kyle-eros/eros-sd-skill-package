@@ -54,18 +54,21 @@ CLAUDE.local.md
 .mcp.json
 
 # Database files (EROS MCP)
-data/*.db
-data/*.db-journal
-data/*.db-wal
-data/*.db-shm
+data/
 
 # MCP Setup Artifacts
 mcp-audit-report.md
 mcp-validation-report.md
-data/schema-*.txt
-data/schema-*.sql
-data/record-counts.txt
-data/db-config.json
+
+# Session state and logs (ephemeral working files)
+**/caption_bank_current_state.md
+**/eros-skill-package-session-log.md
+**/*-session-log.md
+**/*_current_state.md
+
+# Temporary task prompt files
+*_prompt.md
+pivot_*.md
 
 # MCP Server cache
 mcp_server/__pycache__/
