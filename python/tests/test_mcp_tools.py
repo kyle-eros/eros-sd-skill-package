@@ -194,7 +194,7 @@ class TestGetCreatorProfileOptimized:
         if result.get("found"):
             metadata = result.get("metadata", {})
             assert "mcp_calls_saved" in metadata
-            assert metadata["mcp_calls_saved"] == 3  # analytics + volume + rankings
+            assert metadata["mcp_calls_saved"] == 4  # analytics + volume + rankings + vault
 
 
 class TestBackwardCompatibility:

@@ -17,7 +17,7 @@ This agent inherits ALL MCP tools from the eros-db server.
 (The `tools` field is intentionally omitted to enable full inheritance.)
 
 ### Primary Tools Used
-- `mcp__eros-db__get_vault_availability` - Re-verify vault compliance (HARD GATE)
+- `mcp__eros-db__get_allowed_content_types` - Re-verify allowed content types (HARD GATE)
 - `mcp__eros-db__get_content_type_rankings` - Re-verify AVOID exclusion (HARD GATE)
 - `mcp__eros-db__save_schedule` - Persist with ValidationCertificate
 
@@ -72,7 +72,7 @@ Independently verify schedule against hard gates. Generate ValidationCertificate
 
 | Tool | Purpose |
 |------|---------|
-| `mcp__eros-db__get_vault_availability` | Re-verify vault compliance (HARD GATE) |
+| `mcp__eros-db__get_allowed_content_types` | Re-verify allowed content types (HARD GATE) |
 | `mcp__eros-db__get_content_type_rankings` | Re-verify AVOID exclusion (HARD GATE) |
 | `mcp__eros-db__save_schedule` | Persist with ValidationCertificate |
 
@@ -82,9 +82,9 @@ Independently verify schedule against hard gates. Generate ValidationCertificate
 
 ### Gate 1: Vault Compliance
 ```python
-vault_types = mcp__eros-db__get_vault_availability(creator_id).types
+allowed_types = mcp__eros-db__get_allowed_content_types(creator_id).allowed_type_names
 FOR item IN schedule.items:
-    IF item.content_type NOT IN vault_types: REJECT("VAULT_VIOLATION")
+    IF item.content_type NOT IN allowed_types: REJECT("VAULT_VIOLATION")
 ```
 
 ### Gate 2: AVOID Tier Exclusion

@@ -85,19 +85,23 @@ class ProductionMCPClient:
         creator_id: str,
         include_analytics: bool = True,
         include_volume: bool = True,
-        include_content_rankings: bool = True
+        include_content_rankings: bool = True,
+        include_vault: bool = True
     ) -> dict:
         """MCP: mcp__eros-db__get_creator_profile (bundled)
 
-        Returns comprehensive bundle with analytics, volume, and content rankings.
-        Reduces preflight from 7 MCP calls to 4.
+        Returns comprehensive bundle with analytics, volume, content rankings, and allowed content types.
+        Reduces preflight from 8 MCP calls to 4.
+
+        NEW in v1.3.0: include_vault=True bundles allowed_content_types data for HARD GATE validation.
         """
         return await self._call(
             "get_creator_profile",
             creator_id=creator_id,
             include_analytics=include_analytics,
             include_volume=include_volume,
-            include_content_rankings=include_content_rankings
+            include_content_rankings=include_content_rankings,
+            include_vault=include_vault
         )
 
     @with_retry()
@@ -140,9 +144,21 @@ class ProductionMCPClient:
         )
 
     @with_retry()
-    async def get_vault_availability(self, creator_id: str) -> dict:
-        """MCP: mcp__eros-db__get_vault_availability (HARD GATE)"""
-        return await self._call("get_vault_availability", creator_id=creator_id)
+    async def get_allowed_content_types(
+        self,
+        creator_id: str,
+        include_category: bool = True
+    ) -> dict:
+        """MCP: mcp__eros-db__get_allowed_content_types (HARD GATE)
+
+        Returns content types a creator allows for PPV/revenue-based sends.
+        A creator "allows" a content type when has_content=1 in vault_matrix.
+        """
+        return await self._call(
+            "get_allowed_content_types",
+            creator_id=creator_id,
+            include_category=include_category
+        )
 
     @with_retry()
     async def get_content_type_rankings(self, creator_id: str) -> dict:

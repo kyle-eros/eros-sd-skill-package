@@ -5,7 +5,7 @@ Server: eros-db
 Tools: 15 total
 
 Tool Categories:
-  - Creator (5): get_creator_profile, get_active_creators, get_vault_availability,
+  - Creator (5): get_creator_profile, get_active_creators, get_allowed_content_types,
                  get_content_type_rankings, get_persona_profile
   - Schedule (5): get_volume_config, get_active_volume_triggers, get_performance_trends,
                   save_schedule, save_volume_triggers

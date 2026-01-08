@@ -2,7 +2,7 @@
 name: eros-schedule-generator
 description: Generate optimized weekly schedules for OnlyFans creators. Invoke PROACTIVELY for schedule generation, PPV optimization, or content planning requests.
 version: 5.2.0
-allowed-tools: mcp__eros-db__get_creator_profile, mcp__eros-db__get_volume_config, mcp__eros-db__get_vault_availability, mcp__eros-db__get_content_type_rankings, mcp__eros-db__get_persona_profile, mcp__eros-db__get_active_volume_triggers, mcp__eros-db__get_performance_trends, mcp__eros-db__get_batch_captions_by_content_types, mcp__eros-db__get_send_type_captions, mcp__eros-db__save_schedule, mcp__eros-db__save_volume_triggers, mcp__eros-db__get_active_creators, mcp__eros-db__validate_caption_structure, mcp__eros-db__get_send_types
+allowed-tools: mcp__eros-db__get_creator_profile, mcp__eros-db__get_volume_config, mcp__eros-db__get_allowed_content_types, mcp__eros-db__get_content_type_rankings, mcp__eros-db__get_persona_profile, mcp__eros-db__get_active_volume_triggers, mcp__eros-db__get_performance_trends, mcp__eros-db__get_batch_captions_by_content_types, mcp__eros-db__get_send_type_captions, mcp__eros-db__save_schedule, mcp__eros-db__save_volume_triggers, mcp__eros-db__get_active_creators, mcp__eros-db__validate_caption_structure, mcp__eros-db__get_send_types
 triggers:
   - generate schedule
   - weekly schedule
@@ -54,7 +54,7 @@ Before using tools:
 |------|----------|-------------|------|
 | `mcp__eros-db__get_creator_profile` | Creator | **Bundled**: Profile + analytics + volume + rankings | |
 | `mcp__eros-db__get_active_creators` | Creator | Paginated list with tier/revenue filters | |
-| `mcp__eros-db__get_vault_availability` | Creator | Content type availability | HARD |
+| `mcp__eros-db__get_allowed_content_types` | Creator | Allowed content types | HARD |
 | `mcp__eros-db__get_content_type_rankings` | Creator | Performance tiers (also in bundled) | HARD |
 | `mcp__eros-db__get_persona_profile` | Creator | Tone/archetype settings | |
 | `mcp__eros-db__get_volume_config` | Schedule | Tier and daily volumes (also in bundled) | |
@@ -71,7 +71,7 @@ Before using tools:
 
 **Phase 1 - Preflight** (4 MCP calls via bundled response):
 - `mcp__eros-db__get_creator_profile` - **Bundled**: Profile + analytics + volume + rankings (replaces 3 separate calls)
-- `mcp__eros-db__get_vault_availability` - HARD GATE data
+- `mcp__eros-db__get_allowed_content_types` - Allowed content types (HARD GATE)
 - `mcp__eros-db__get_persona_profile` - Caption styling
 - `mcp__eros-db__get_active_volume_triggers` - Performance triggers
 
@@ -81,7 +81,7 @@ Before using tools:
 - `mcp__eros-db__validate_caption_structure` - Quality check
 
 **Phase 3 - Validate** (3 tools):
-- `mcp__eros-db__get_vault_availability` - Re-verify HARD GATE
+- `mcp__eros-db__get_allowed_content_types` - Re-verify allowed types (HARD GATE)
 - `mcp__eros-db__get_content_type_rankings` - Re-verify HARD GATE
 - `mcp__eros-db__save_schedule` - Persist with certificate
 
@@ -126,7 +126,7 @@ python python/preflight.py --creator grace_bennett --week 2026-01-06
 |-------|------|-----------------|
 | `creator_id` | string | `mcp__eros-db__get_creator_profile` |
 | `page_type` | "paid" \| "free" | `mcp__eros-db__get_creator_profile` |
-| `vault_types` | string[] | `mcp__eros-db__get_vault_availability` |
+| `allowed_types` | string[] | `mcp__eros-db__get_allowed_content_types` |
 | `avoid_types` | string[] | `mcp__eros-db__get_content_type_rankings` |
 | `top_content_types` | {type, tier}[] | `mcp__eros-db__get_content_type_rankings` |
 | `volume_config` | VolumeConfig | `mcp__eros-db__get_volume_config` |
@@ -207,7 +207,7 @@ python python/preflight.py --creator grace_bennett --week 2026-01-06
 | Tool | Purpose |
 |------|---------|
 | `mcp__eros-db__get_creator_profile` | **Bundled**: Profile + analytics + volume + rankings (43% reduction from 7 to 4 calls) |
-| `mcp__eros-db__get_vault_availability` | Available content types (HARD GATE) |
+| `mcp__eros-db__get_allowed_content_types` | Allowed content types (HARD GATE) |
 | `mcp__eros-db__get_persona_profile` | Tone, archetype, voice |
 | `mcp__eros-db__get_active_volume_triggers` | Performance-based adjustments |
 
@@ -225,7 +225,7 @@ python python/preflight.py --creator grace_bennett --week 2026-01-06
 
 | Tool | Purpose |
 |------|---------|
-| `mcp__eros-db__get_vault_availability` | Re-verify vault compliance |
+| `mcp__eros-db__get_allowed_content_types` | Re-verify allowed content types |
 | `mcp__eros-db__get_content_type_rankings` | Re-verify AVOID exclusion |
 | `mcp__eros-db__save_schedule` | Persist with ValidationCertificate |
 

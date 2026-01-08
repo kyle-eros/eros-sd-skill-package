@@ -431,7 +431,7 @@ Certificate must be < 5 minutes old at save_schedule time.
 | `get_active_creators` | Creator | Paginated list with filters (tier, page_type, revenue) |
 | `get_creator_profile` | Creator | **Bundled**: Profile + analytics + volume + rankings (v1.1.0) |
 | `get_persona_profile` | Creator | Tone, archetype, voice |
-| `get_vault_availability` | Creator | Vault content types (HARD GATE) |
+| `get_allowed_content_types` | Creator | Allowed content types (HARD GATE) |
 | `get_send_type_captions` | Caption | Send-type compatible captions |
 | `get_batch_captions_by_content_types` | Caption | Batch PPV caption retrieval |
 | `get_content_type_rankings` | Performance | TOP/MID/LOW/AVOID (HARD GATE) |

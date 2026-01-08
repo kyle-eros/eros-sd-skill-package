@@ -46,9 +46,9 @@ class MCPClient(Protocol):
     """Protocol for MCP client - matches eros-db server tools (15 total)."""
 
     # Creator tools (5)
-    async def get_creator_profile(self, creator_id: str, include_analytics: bool = True, include_volume: bool = True, include_content_rankings: bool = True) -> dict: ...
+    async def get_creator_profile(self, creator_id: str, include_analytics: bool = True, include_volume: bool = True, include_content_rankings: bool = True, include_vault: bool = True) -> dict: ...
     async def get_active_creators(self, limit: int = 100, tier: str = None) -> dict: ...
-    async def get_vault_availability(self, creator_id: str) -> dict: ...
+    async def get_allowed_content_types(self, creator_id: str, include_category: bool = True) -> dict: ...
     async def get_content_type_rankings(self, creator_id: str) -> dict: ...
     async def get_persona_profile(self, creator_id: str) -> dict: ...
 
@@ -95,14 +95,24 @@ class PreflightEngine:
             preflight_duration_ms=(datetime.now()-start).total_seconds()*1000, mcp_calls_made=4)
 
     async def _fetch_all(self, cid: str, ws: str) -> dict:
-        """Fetch all creator data with optimized bundled call."""
+        """Fetch all creator data with optimized bundled call.
 
-        # Use bundled get_creator_profile for efficiency (saves 2-3 MCP calls)
+        Uses bundled get_creator_profile for efficiency (saves 4 MCP calls):
+        - analytics, volume, content_rankings, and vault all bundled.
+
+        CRITICAL FIX (v1.3.0): Vault data now comes directly from vault_matrix
+        instead of being derived from top_content_types. This ensures we catch
+        vault content that may not have historical performance data.
+        """
+
+        # Use bundled get_creator_profile for efficiency (saves 4 MCP calls)
+        # NEW: include_vault=True uses actual vault_matrix data (HARD GATE)
         profile_bundle = await self.mcp.get_creator_profile(
             cid,
             include_analytics=True,
             include_volume=True,
-            include_content_rankings=True
+            include_content_rankings=True,
+            include_vault=True  # CRITICAL: Use actual vault_matrix data
         )
 
         # Parallel fetch remaining data not in bundle
@@ -114,16 +124,13 @@ class PreflightEngine:
         )
 
         # Reconstruct the raw dict format expected by downstream methods
+        # FIXED: Now using actual vault_matrix data instead of deriving from top_content_types
+        vault_data = profile_bundle.get("allowed_content_types", {})
+
         return {
             "creator_profile": profile_bundle.get("creator", {}),
             "volume_config": profile_bundle.get("volume_assignment", {}),
-            "vault_availability": {
-                "available_types": [
-                    {"type_name": ct.get("type_name")}
-                    for ct in profile_bundle.get("top_content_types", [])
-                    if ct.get("performance_tier") != "AVOID"
-                ]
-            },
+            "allowed_content_types": vault_data,  # FIXED: Direct from vault_matrix (HARD GATE)
             "content_type_rankings": {
                 "content_types": profile_bundle.get("top_content_types", [])
             },
@@ -283,9 +290,21 @@ class PreflightEngine:
         return (base + 3) % 60 if base % 15 == 0 else base
 
     def _vault_types(self, raw: dict) -> list[str]:
-        v = raw.get("vault_availability", {})
-        t = v.get("available_types", v.get("content_types", []))
-        return [x.get("type_name", x) if isinstance(x, dict) else x for x in t] if isinstance(t, list) else []
+        """Extract allowed content types from raw data.
+
+        Uses allowed_content_types from bundled get_creator_profile response.
+        This is authoritative data from vault_matrix (has_content=1).
+        """
+        v = raw.get("allowed_content_types", {})
+
+        # Primary source: allowed_type_names list
+        type_names = v.get("allowed_type_names", [])
+        if type_names:
+            return type_names
+
+        # Fallback: extract from allowed_types array
+        allowed = v.get("allowed_types", [])
+        return [x.get("type_name") for x in allowed if x.get("type_name")]
 
     def _avoid_types(self, raw: dict) -> list[str]:
         r = raw.get("content_type_rankings", {})
@@ -309,15 +328,27 @@ class PreflightEngine:
 if __name__ == "__main__":
     import argparse
     class MockMCP:
-        async def get_creator_profile(self, c, include_analytics=True, include_volume=True, include_content_rankings=True):
-            return {
+        async def get_creator_profile(self, c, include_analytics=True, include_volume=True, include_content_rankings=True, include_vault=True):
+            response = {
                 "found": True,
                 "creator": {"is_active": True, "page_type": "paid", "current_fan_count": 5000},
                 "analytics_summary": {"mm_revenue_30d": 2500, "mm_revenue_confidence": "medium"},
                 "volume_assignment": {"volume_level": "STANDARD", "revenue_per_day": [4, 6]},
                 "top_content_types": [{"type_name": "lingerie", "performance_tier": "TOP", "rps": 180}],
-                "metadata": {"mcp_calls_saved": 3}
+                "metadata": {"mcp_calls_saved": 4}
             }
+            if include_vault:
+                response["allowed_content_types"] = {
+                    "allowed_types": [
+                        {"type_name": "lingerie", "type_category": "softcore", "is_explicit": True},
+                        {"type_name": "b/g", "type_category": "explicit", "is_explicit": True},
+                        {"type_name": "solo", "type_category": "softcore", "is_explicit": True}
+                    ],
+                    "allowed_type_names": ["lingerie", "b/g", "solo"],
+                    "type_count": 3,
+                    "vault_hash": "sha256:mock12345678"
+                }
+            return response
         async def get_persona_profile(self, c): return {"primary_tone": "GFE"}
         async def get_active_volume_triggers(self, c): return []
         async def get_performance_trends(self, c, p): return {"saturation_score": 45, "consecutive_decline_weeks": 0}

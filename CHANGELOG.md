@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-01-08
+
+### Changed
+- **RENAMED**: `get_vault_availability` → `get_allowed_content_types`
+  - Clearer semantic: returns content types a creator "allows" for scheduling
+  - Simplified response structure (removed quantity_available, quality_rating, notes)
+  - Response now uses `allowed_types` and `allowed_type_names` instead of `available_types` and `type_names`
+- **SIMPLIFIED**: Response structure reduced from ~15 fields to 4 core fields
+  - `allowed_types` - list with type_name, type_category, is_explicit
+  - `allowed_type_names` - simple string list for validation
+  - `type_count` - number of allowed types
+  - `vault_hash` - deterministic hash for ValidationCertificate
+- **UPDATED**: `get_creator_profile` bundled response now uses `allowed_content_types` key instead of `vault_availability`
+
+### Removed
+- `include_quality`, `include_notes`, `min_quantity` parameters (no longer needed)
+- `content_count`, `quality_rating`, `updated_at`, `notes` fields from response
+- `total_available` field (was redundant with type_count)
+
+---
+
 ## [1.2.0] - 2026-01-08
 
 ### Changed

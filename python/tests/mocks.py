@@ -57,15 +57,56 @@ class MockMCPClient:
 
     def _log(self, method: str): self.call_log.append(method)
 
-    async def get_creator_profile(self, creator_id: str) -> dict:
+    async def get_creator_profile(self, creator_id: str, include_analytics: bool = True,
+                                   include_volume: bool = True, include_content_rankings: bool = True,
+                                   include_vault: bool = True) -> dict:
+        """Mock bundled creator profile."""
         self._log("get_creator_profile")
         c = self.config
-        return {
-            "creator_id": creator_id, "page_type": c.page_type, "is_active": c.is_active,
-            "current_fan_count": c.fan_count, "mm_revenue_monthly": c.mm_revenue_monthly,
-            "content_category": c.content_category, "base_price": 15.00,
-            "has_active_experiments": False,
+
+        response = {
+            "found": True,
+            "creator": {
+                "creator_id": creator_id, "page_type": c.page_type, "is_active": c.is_active,
+                "current_fan_count": c.fan_count, "mm_revenue_monthly": c.mm_revenue_monthly,
+                "content_category": c.content_category, "base_price": 15.00,
+                "has_active_experiments": False,
+            },
+            "metadata": {"mcp_calls_saved": 4}
         }
+
+        if include_analytics:
+            response["analytics_summary"] = {
+                "mm_revenue_30d": c.mm_revenue_monthly or 0,
+                "mm_revenue_confidence": "medium"
+            }
+
+        if include_volume:
+            response["volume_assignment"] = {
+                "volume_level": "STANDARD",
+                "revenue_per_day": [4, 6]
+            }
+
+        if include_content_rankings:
+            types = []
+            for i, t in enumerate(c.vault_types):
+                tier = "AVOID" if t in c.avoid_types else ("TOP" if i < 2 else "MID")
+                types.append({
+                    "type_name": t, "performance_tier": tier, "rps": 180 - i * 20,
+                    "conversion_rate": 5.5 - i * 0.5, "sends_last_30d": 10 + i,
+                })
+            response["top_content_types"] = types
+
+        if include_vault:
+            allowed_result = await self.get_allowed_content_types(creator_id)
+            response["allowed_content_types"] = {
+                "allowed_types": allowed_result["allowed_types"],
+                "allowed_type_names": allowed_result["allowed_type_names"],
+                "type_count": allowed_result["type_count"],
+                "vault_hash": allowed_result["metadata"]["vault_hash"]
+            }
+
+        return response
 
     async def get_volume_config(self, creator_id: str, week_start: str) -> dict:
         self._log("get_volume_config")
@@ -74,9 +115,34 @@ class MockMCPClient:
             "fused_opportunity": 100 - self.config.saturation, "previous_tier": None,
         }
 
-    async def get_vault_availability(self, creator_id: str) -> dict:
-        self._log("get_vault_availability")
-        return {"available_types": [{"type_name": t} for t in self.config.vault_types]}
+    async def get_allowed_content_types(self, creator_id: str, include_category: bool = True) -> dict:
+        """Mock allowed content types response."""
+        self._log("get_allowed_content_types")
+
+        allowed_types = []
+        for vt in self.config.vault_types:
+            type_data = {"type_name": vt}
+            if include_category:
+                type_data["type_category"] = "explicit" if vt in ["b/g", "anal", "blowjob"] else "softcore"
+                type_data["is_explicit"] = vt not in ["lifestyle", "fitness", "teasing"]
+            allowed_types.append(type_data)
+
+        allowed_type_names = [t["type_name"] for t in allowed_types]
+
+        hash_input = "|".join(sorted(allowed_type_names))
+        vault_hash = f"sha256:{hashlib.sha256(hash_input.encode()).hexdigest()[:16]}"
+
+        return {
+            "creator_id": creator_id,
+            "allowed_types": allowed_types,
+            "allowed_type_names": allowed_type_names,
+            "type_count": len(allowed_type_names),
+            "metadata": {
+                "fetched_at": "2026-01-08T21:00:00",
+                "vault_hash": vault_hash,
+                "creator_resolved": creator_id
+            }
+        }
 
     async def get_content_type_rankings(self, creator_id: str) -> dict:
         self._log("get_content_type_rankings")

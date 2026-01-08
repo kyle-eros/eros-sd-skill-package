@@ -6,7 +6,7 @@ Server Name: eros-db
 Tool Naming Convention: mcp__eros-db__<tool-name>
 
 Tools (15 total):
-  Creator (5): get_creator_profile, get_active_creators, get_vault_availability,
+  Creator (5): get_creator_profile, get_active_creators, get_allowed_content_types,
                get_content_type_rankings, get_persona_profile
   Schedule (5): get_volume_config, get_active_volume_triggers, get_performance_trends,
                 save_schedule, save_volume_triggers
@@ -300,9 +300,10 @@ def get_creator_profile(
     creator_id: str,
     include_analytics: bool = True,
     include_volume: bool = True,
-    include_content_rankings: bool = True
+    include_content_rankings: bool = True,
+    include_vault: bool = True
 ) -> dict:
-    """Retrieves comprehensive creator profile with analytics, volume, and content rankings.
+    """Retrieves comprehensive creator profile with analytics, volume, content rankings, and vault.
 
     MCP Name: mcp__eros-db__get_creator_profile
 
@@ -314,6 +315,7 @@ def get_creator_profile(
         include_analytics: Include 30-day performance metrics with confidence (default: True)
         include_volume: Include volume tier and daily distribution (default: True)
         include_content_rankings: Include TOP/MID/LOW/AVOID content types (default: True)
+        include_vault: Include vault availability from vault_matrix (default: True)
 
     Returns:
         Comprehensive profile bundle:
@@ -338,12 +340,16 @@ def get_creator_profile(
             "top_content_types": [  # if include_content_rankings=True
                 {"type_name", "performance_tier", "rps", "conversion_rate", "send_count"}
             ],
+            "allowed_content_types": {  # if include_vault=True
+                "allowed_types", "allowed_type_names",
+                "type_count", "vault_hash"
+            },
             "metadata": {
                 "fetched_at", "data_sources_used", "mcp_calls_saved"
             }
         }
     """
-    logger.info(f"get_creator_profile: creator_id={creator_id}, analytics={include_analytics}, volume={include_volume}, rankings={include_content_rankings}")
+    logger.info(f"get_creator_profile: creator_id={creator_id}, analytics={include_analytics}, volume={include_volume}, rankings={include_content_rankings}, vault={include_vault}")
 
     fetched_at = datetime.now().isoformat()
     data_sources = []
@@ -507,11 +513,47 @@ def get_creator_profile(
             response["avoid_types"] = [r["type_name"] for r in rankings if r.get("performance_tier") == "AVOID"]
             response["top_types"] = [r["type_name"] for r in rankings if r.get("performance_tier") == "TOP"]
 
+        # Step 5b: Get allowed content types (if requested)
+        if include_vault:
+            import hashlib
+
+            vault_types = db_query("""
+                SELECT ct.type_name, ct.type_category, ct.is_explicit
+                FROM vault_matrix vm
+                JOIN content_types ct ON vm.content_type_id = ct.content_type_id
+                WHERE vm.creator_id = ? AND vm.has_content = 1
+                ORDER BY ct.type_name ASC
+            """, (creator_pk,))
+
+            if vault_types:
+                data_sources.append("vault_matrix")
+
+            allowed_type_names = [v["type_name"] for v in vault_types]
+
+            # Compute vault hash for ValidationCertificate
+            hash_input = "|".join(sorted(allowed_type_names))
+            vault_hash = f"sha256:{hashlib.sha256(hash_input.encode()).hexdigest()[:16]}"
+
+            response["allowed_content_types"] = {
+                "allowed_types": [
+                    {
+                        "type_name": v["type_name"],
+                        "type_category": v.get("type_category"),
+                        "is_explicit": bool(v.get("is_explicit", 1))
+                    }
+                    for v in vault_types
+                ],
+                "allowed_type_names": allowed_type_names,
+                "type_count": len(allowed_type_names),
+                "vault_hash": vault_hash
+            }
+
         # Step 6: Add metadata
         mcp_calls_saved = 0
         if include_analytics: mcp_calls_saved += 1
         if include_volume: mcp_calls_saved += 1
         if include_content_rankings: mcp_calls_saved += 1
+        if include_vault: mcp_calls_saved += 1
 
         response["metadata"] = {
             "fetched_at": fetched_at,
@@ -520,7 +562,8 @@ def get_creator_profile(
             "include_flags": {
                 "analytics": include_analytics,
                 "volume": include_volume,
-                "content_rankings": include_content_rankings
+                "content_rankings": include_content_rankings,
+                "vault": include_vault
             }
         }
 
@@ -814,51 +857,135 @@ def get_active_creators(
 
 
 @mcp.tool()
-def get_vault_availability(creator_id: str) -> dict:
-    """Returns available content types in creator's vault.
+def get_allowed_content_types(
+    creator_id: str,
+    include_category: bool = True
+) -> dict:
+    """Returns content types a creator allows for PPV/revenue-based sends.
 
-    MCP Name: mcp__eros-db__get_vault_availability
-    HARD GATE DATA - Used for validation
+    MCP Name: mcp__eros-db__get_allowed_content_types
+    HARD GATE DATA - Zero tolerance validation
+
+    A creator "allows" a content type when has_content=1 in vault_matrix.
+    This determines:
+    1. What content types can be scheduled for this creator
+    2. What caption themes are appropriate for their sends
 
     Args:
-        creator_id: Creator identifier
+        creator_id: Creator identifier (creator_id or page_name)
+        include_category: Include type_category and is_explicit per type (default: True)
 
     Returns:
-        Available content types with counts
+        Allowed content types for the creator:
+        {
+            "creator_id": str,
+            "allowed_types": [
+                {
+                    "type_name": str,
+                    "type_category": str | None,  # if include_category
+                    "is_explicit": bool           # if include_category
+                }
+            ],
+            "allowed_type_names": [str, ...],    # Simple list for quick validation
+            "type_count": int,
+            "metadata": {
+                "fetched_at": str,
+                "vault_hash": str,
+                "creator_resolved": str
+            }
+        }
+
+        Error response:
+        {
+            "error": str,
+            "allowed_types": [],
+            "allowed_type_names": [],
+            "type_count": 0,
+            "metadata": {"fetched_at": str, "error": True}
+        }
     """
-    logger.info(f"get_vault_availability: creator_id={creator_id}")
+    import hashlib
+
+    logger.info(f"get_allowed_content_types: creator_id={creator_id}, include_category={include_category}")
+    fetched_at = datetime.now().isoformat()
+
     try:
-        # Verify creator exists
-        creator = db_query(
-            "SELECT creator_id FROM creators WHERE creator_id = ? OR page_name = ? LIMIT 1",
-            (creator_id, creator_id)
-        )
-        if not creator:
-            return {"error": f"Creator not found: {creator_id}", "available_types": []}
+        # ============================================================
+        # STEP 1: RESOLVE CREATOR
+        # ============================================================
+        resolved = resolve_creator_id(creator_id)
+        if not resolved.get("found"):
+            return {
+                "error": f"Creator not found: {creator_id}",
+                "allowed_types": [],
+                "allowed_type_names": [],
+                "type_count": 0,
+                "metadata": {"fetched_at": fetched_at, "error": True}
+            }
 
-        creator_pk = creator[0]['creator_id']
+        creator_pk = resolved["creator_id"]
 
-        # Query vault_matrix (actual table name, not vault_content)
-        types = db_query("""
-            SELECT ct.type_name, vm.quantity_available as content_count, vm.has_content
+        # ============================================================
+        # STEP 2: BUILD QUERY (only types with has_content=1)
+        # ============================================================
+        select_fields = ["ct.type_name"]
+
+        if include_category:
+            select_fields.extend(["ct.type_category", "ct.is_explicit"])
+
+        query = f"""
+            SELECT {', '.join(select_fields)}
             FROM vault_matrix vm
             JOIN content_types ct ON vm.content_type_id = ct.content_type_id
             WHERE vm.creator_id = ? AND vm.has_content = 1
-            ORDER BY vm.quantity_available DESC
-        """, (creator_pk,))
+            ORDER BY ct.type_name ASC
+        """
 
-        type_names = [t['type_name'] for t in types]
+        types = db_query(query, (creator_pk,))
+
+        # ============================================================
+        # STEP 3: BUILD RESPONSE
+        # ============================================================
+        allowed_types = []
+        allowed_type_names = []
+
+        for t in types:
+            type_data = {"type_name": t["type_name"]}
+
+            if include_category:
+                type_data["type_category"] = t.get("type_category")
+                type_data["is_explicit"] = bool(t.get("is_explicit", 1))
+
+            allowed_types.append(type_data)
+            allowed_type_names.append(t["type_name"])
+
+        # ============================================================
+        # STEP 4: COMPUTE VAULT HASH (for ValidationCertificate)
+        # ============================================================
+        hash_input = "|".join(sorted(allowed_type_names))
+        vault_hash = f"sha256:{hashlib.sha256(hash_input.encode()).hexdigest()[:16]}"
 
         return {
             "creator_id": creator_id,
-            "available_types": types,
-            "type_names": type_names,
-            "total_available": sum(t.get('content_count', 0) or 0 for t in types)
+            "allowed_types": allowed_types,
+            "allowed_type_names": allowed_type_names,
+            "type_count": len(allowed_type_names),
+            "metadata": {
+                "fetched_at": fetched_at,
+                "vault_hash": vault_hash,
+                "creator_resolved": creator_pk
+            }
         }
 
     except Exception as e:
-        logger.error(f"get_vault_availability error: {e}")
-        return {"error": str(e), "available_types": [], "type_names": []}
+        logger.error(f"get_allowed_content_types error: {e}")
+        return {
+            "error": str(e),
+            "allowed_types": [],
+            "allowed_type_names": [],
+            "type_count": 0,
+            "metadata": {"fetched_at": fetched_at, "error": True}
+        }
 
 
 @mcp.tool()

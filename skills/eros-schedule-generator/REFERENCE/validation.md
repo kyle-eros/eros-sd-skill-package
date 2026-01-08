@@ -16,7 +16,7 @@ FOR item in schedule:
         REJECT("VAULT_VIOLATION")
 ```
 
-**Source**: `get_vault_availability(creator_id)`
+**Source**: `get_allowed_content_types(creator_id)`
 
 ### Gate 2: AVOID Tier Exclusion
 

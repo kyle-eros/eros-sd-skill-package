@@ -158,7 +158,7 @@ for phase, metrics in result.metrics.items():
 **Diagnosis:**
 ```python
 # Check vault availability
-vault = await mcp.get_vault_availability(creator_id)
+vault = await mcp.get_allowed_content_types(creator_id)
 print(f"Vault types: {vault}")
 
 # Check content rankings
