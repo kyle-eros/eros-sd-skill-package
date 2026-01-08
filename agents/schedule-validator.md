@@ -89,8 +89,10 @@ FOR item IN schedule.items:
 
 ### Gate 2: AVOID Tier Exclusion
 ```python
+# v1.4.0: Use pre-computed avoid_types and metadata hashes
 rankings = mcp__eros-db__get_content_type_rankings(creator_id)
-avoid_types = [r.type for r in rankings if r.tier == "AVOID"]
+avoid_types = rankings["avoid_types"]  # Pre-computed list
+avoid_hash = rankings["metadata"]["avoid_types_hash"]  # For certificate
 FOR item IN schedule.items:
     IF item.content_type IN avoid_types: REJECT("AVOID_TIER_VIOLATION")
 ```

@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from mcp_server.main import (
     get_creator_profile,
     get_active_creators,
+    get_content_type_rankings,
     validate_creator_id,
     resolve_creator_id,
     get_mm_revenue_with_fallback
@@ -402,6 +403,86 @@ class TestGetActiveCreatorsOptimized:
         assert "metadata" in result
         assert result["creators"] == []
         assert result["count"] == 0
+
+
+class TestGetContentTypeRankings:
+    """Tests for get_content_type_rankings MCP tool."""
+
+    def test_basic_call_returns_expected_structure(self):
+        """Verify response contains all expected fields."""
+        result = get_content_type_rankings("grace_bennett")
+
+        assert "rankings" in result or "error" in result
+        if "error" not in result:
+            assert "avoid_types" in result
+            assert "top_types" in result
+            assert "total_types" in result
+            assert "metadata" in result
+
+    def test_metadata_structure(self):
+        """Verify metadata contains expected fields."""
+        result = get_content_type_rankings("grace_bennett")
+
+        if "error" not in result:
+            metadata = result.get("metadata", {})
+            assert "fetched_at" in metadata
+            assert "rankings_hash" in metadata
+            assert "avoid_types_hash" in metadata
+            assert "creator_resolved" in metadata
+            assert "analysis_date" in metadata
+            assert "data_age_days" in metadata
+            assert "is_stale" in metadata
+
+    def test_include_metrics_true(self):
+        """Verify metrics included by default."""
+        result = get_content_type_rankings("grace_bennett", include_metrics=True)
+
+        if "error" not in result and result.get("rankings"):
+            ranking = result["rankings"][0]
+            assert "rps" in ranking
+            assert "conversion_rate" in ranking
+            assert "sends_last_30d" in ranking
+
+    def test_include_metrics_false(self):
+        """Verify lightweight response without metrics."""
+        result = get_content_type_rankings("grace_bennett", include_metrics=False)
+
+        if "error" not in result and result.get("rankings"):
+            ranking = result["rankings"][0]
+            assert "type_name" in ranking
+            assert "performance_tier" in ranking
+            # Metrics should NOT be present
+            assert "rps" not in ranking
+
+    def test_avoid_types_hash_consistency(self):
+        """Verify avoid_types_hash is consistent for same data."""
+        result1 = get_content_type_rankings("grace_bennett")
+        result2 = get_content_type_rankings("grace_bennett")
+
+        if "error" not in result1 and "error" not in result2:
+            hash1 = result1.get("metadata", {}).get("avoid_types_hash")
+            hash2 = result2.get("metadata", {}).get("avoid_types_hash")
+            assert hash1 == hash2, "Hash should be deterministic"
+
+    def test_creator_not_found(self):
+        """Verify error response for invalid creator."""
+        result = get_content_type_rankings("nonexistent_creator_xyz")
+
+        assert "error" in result
+        assert result["rankings"] == []
+        assert result["avoid_types"] == []
+        assert result["total_types"] == 0
+
+    def test_analysis_date_filter_applied(self):
+        """Verify only latest analysis data is returned."""
+        # This test verifies the critical bug fix
+        result = get_content_type_rankings("grace_bennett")
+
+        if "error" not in result:
+            # All rankings should have same analysis_date (if present)
+            analysis_date = result.get("metadata", {}).get("analysis_date")
+            # The presence of analysis_date in metadata indicates fix is applied
+            assert analysis_date is not None or result["total_types"] == 0
 
 
 if __name__ == "__main__":

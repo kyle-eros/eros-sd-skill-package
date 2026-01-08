@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-01-08
+
+### Fixed
+- **CRITICAL**: `get_content_type_rankings` now filters by latest `analysis_date` to prevent stale data mixing
+- Applied same `analysis_date` filter to bundled query in `get_creator_profile`
+
+### Changed
+- `get_content_type_rankings` response structure: `content_types` → `rankings`
+- Preflight method renamed: `_top_types` → `_all_content_rankings` (accuracy)
+- Preflight now uses pre-computed `avoid_types` from bundled response
+
+### Added
+- `include_metrics` parameter for lightweight validation-only calls
+- `metadata.rankings_hash` for ValidationCertificate integrity
+- `metadata.avoid_types_hash` for HARD GATE verification
+- `metadata.analysis_date`, `data_age_days`, `is_stale` for observability
+- 7 new tests for `get_content_type_rankings`
+
+### Backward Compatibility
+- Legacy keys (`top_content_types`, `avoid_types`, `top_types`) preserved at root in bundled response
+- Preflight has fallbacks for old response structures
+
+---
+
 ## [1.3.0] - 2026-01-08
 
 ### Changed

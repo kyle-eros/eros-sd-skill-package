@@ -95,10 +95,13 @@ FOR item in schedule:
 
 ### Gate 2: AVOID Tier Exclusion
 
-```
-FOR item in schedule:
-    IF item.content_type IN content_type_rankings.avoid_types:
-        REJECT("AVOID_TIER_VIOLATION")
+```python
+# v1.4.0: Use pre-computed avoid_types and metadata hashes
+rankings = mcp__eros-db__get_content_type_rankings(creator_id)
+avoid_types = rankings["avoid_types"]  # Pre-computed list
+avoid_hash = rankings["metadata"]["avoid_types_hash"]  # For ValidationCertificate
+FOR item IN schedule.items:
+    IF item.content_type IN avoid_types: REJECT("AVOID_TIER_VIOLATION")
 ```
 
 ### Gate 3: Page Type Restrictions
@@ -434,7 +437,7 @@ Certificate must be < 5 minutes old at save_schedule time.
 | `get_allowed_content_types` | Creator | Allowed content types (HARD GATE) |
 | `get_send_type_captions` | Caption | Send-type compatible captions |
 | `get_batch_captions_by_content_types` | Caption | Batch PPV caption retrieval |
-| `get_content_type_rankings` | Performance | TOP/MID/LOW/AVOID (HARD GATE) |
+| `get_content_type_rankings` | Performance | TOP/MID/LOW/AVOID (HARD GATE) - v1.4.0: returns `rankings`, `avoid_types`, `metadata.rankings_hash`, `metadata.avoid_types_hash` |
 | `get_performance_trends` | Performance | Saturation/opportunity |
 | `get_dow_performance` | Performance | ALPHA/BETA/GAMMA classification |
 | `get_send_types` | Config | Full 22-type taxonomy |

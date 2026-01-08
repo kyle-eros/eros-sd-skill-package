@@ -88,7 +88,7 @@ class PreflightEngine:
         return CreatorContext(
             creator_id=creator_id, page_type=profile.get("page_type", "paid"),
             vault_types=tuple(self._vault_types(raw)), avoid_types=tuple(self._avoid_types(raw)),
-            top_content_types=tuple(self._top_types(raw)), volume_config=volume,
+            top_content_types=tuple(self._all_content_rankings(raw)), volume_config=volume,
             persona=raw.get("persona_profile", {}), active_triggers=tuple(triggers),
             pricing_config=self._pricing(raw), timing_slots=timing, health=health,
             generated_at=datetime.now().isoformat(),
@@ -103,16 +103,18 @@ class PreflightEngine:
         CRITICAL FIX (v1.3.0): Vault data now comes directly from vault_matrix
         instead of being derived from top_content_types. This ensures we catch
         vault content that may not have historical performance data.
+
+        CRITICAL FIX (v1.4.0): Now uses pre-computed avoid_types and top_types
+        from bundled response instead of re-computing them.
         """
 
         # Use bundled get_creator_profile for efficiency (saves 4 MCP calls)
-        # NEW: include_vault=True uses actual vault_matrix data (HARD GATE)
         profile_bundle = await self.mcp.get_creator_profile(
             cid,
             include_analytics=True,
             include_volume=True,
             include_content_rankings=True,
-            include_vault=True  # CRITICAL: Use actual vault_matrix data
+            include_vault=True
         )
 
         # Parallel fetch remaining data not in bundle
@@ -123,17 +125,25 @@ class PreflightEngine:
             return_exceptions=True
         )
 
-        # Reconstruct the raw dict format expected by downstream methods
-        # FIXED: Now using actual vault_matrix data instead of deriving from top_content_types
+        # Extract vault data (HARD GATE - from vault_matrix)
         vault_data = profile_bundle.get("allowed_content_types", {})
+
+        # Extract rankings data (HARD GATE - from top_content_types with analysis_date filter)
+        # NEW: Use new structure if available, fall back to legacy
+        rankings_data = profile_bundle.get("content_type_rankings", {})
+        if not rankings_data:
+            # Legacy fallback
+            rankings_data = {
+                "rankings": profile_bundle.get("top_content_types", []),
+                "avoid_types": profile_bundle.get("avoid_types", []),
+                "top_types": profile_bundle.get("top_types", [])
+            }
 
         return {
             "creator_profile": profile_bundle.get("creator", {}),
             "volume_config": profile_bundle.get("volume_assignment", {}),
-            "allowed_content_types": vault_data,  # FIXED: Direct from vault_matrix (HARD GATE)
-            "content_type_rankings": {
-                "content_types": profile_bundle.get("top_content_types", [])
-            },
+            "allowed_content_types": vault_data,
+            "content_type_rankings": rankings_data,  # Now includes pre-computed lists
             "analytics_summary": profile_bundle.get("analytics_summary", {}),
             "persona_profile": remaining_results[0] if not isinstance(remaining_results[0], Exception) else {},
             "active_triggers": remaining_results[1] if not isinstance(remaining_results[1], Exception) else [],
@@ -307,15 +317,56 @@ class PreflightEngine:
         return [x.get("type_name") for x in allowed if x.get("type_name")]
 
     def _avoid_types(self, raw: dict) -> list[str]:
-        r = raw.get("content_type_rankings", {})
-        return [x.get("type_name", x.get("content_type", "")) for x in r.get("content_types", r.get("rankings", []))
-                if x.get("performance_tier") == "AVOID"]
+        """Extract AVOID tier content types from raw data.
 
-    def _top_types(self, raw: dict) -> list[dict]:
+        OPTIMIZATION (v1.4.0): Now uses pre-computed avoid_types from bundled
+        response instead of re-iterating through rankings.
+        """
         r = raw.get("content_type_rankings", {})
-        return [{"type_name": x.get("type_name", x.get("content_type", "")),
-                 "performance_tier": x.get("performance_tier", "MID")}
-                for x in r.get("content_types", r.get("rankings", []))]
+
+        # Primary: Use pre-computed list (new structure)
+        avoid_list = r.get("avoid_types", [])
+        if avoid_list:
+            return avoid_list
+
+        # Fallback: Compute from rankings (legacy)
+        rankings = r.get("rankings", r.get("content_types", []))
+        return [
+            x.get("type_name", x.get("content_type", ""))
+            for x in rankings
+            if x.get("performance_tier") == "AVOID"
+        ]
+
+    def _all_content_rankings(self, raw: dict) -> list[dict]:
+        """Extract all content type rankings with their tiers.
+
+        Returns list of {type_name, performance_tier} for all ranked content types.
+        Note: Despite historical name, this returns ALL tiers, not just TOP.
+
+        OPTIMIZATION (v1.4.0): Now uses pre-computed rankings from bundled response.
+        """
+        r = raw.get("content_type_rankings", {})
+
+        # Primary: Use rankings list (new structure)
+        rankings = r.get("rankings", [])
+        if rankings:
+            return [
+                {
+                    "type_name": x.get("type_name", ""),
+                    "performance_tier": x.get("performance_tier", "MID")
+                }
+                for x in rankings
+            ]
+
+        # Fallback: Use legacy content_types key
+        content_types = r.get("content_types", [])
+        return [
+            {
+                "type_name": x.get("type_name", x.get("content_type", "")),
+                "performance_tier": x.get("performance_tier", "MID")
+            }
+            for x in content_types
+        ]
 
     def _pricing(self, raw: dict) -> dict:
         p = raw.get("creator_profile", {})

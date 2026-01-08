@@ -88,14 +88,45 @@ class MockMCPClient:
             }
 
         if include_content_rankings:
-            types = []
+            rankings = []
+            avoid_types = []
+            top_types = []
+
             for i, t in enumerate(c.vault_types):
                 tier = "AVOID" if t in c.avoid_types else ("TOP" if i < 2 else "MID")
-                types.append({
-                    "type_name": t, "performance_tier": tier, "rps": 180 - i * 20,
-                    "conversion_rate": 5.5 - i * 0.5, "sends_last_30d": 10 + i,
+                rankings.append({
+                    "type_name": t,
+                    "performance_tier": tier,
+                    "rps": 180.0 - i * 20,
+                    "conversion_rate": 5.5 - i * 0.5,
+                    "sends_last_30d": 10 + i,
+                    "total_earnings": 1000.0 - i * 100,
+                    "confidence_score": 0.85
                 })
-            response["top_content_types"] = types
+                if tier == "AVOID":
+                    avoid_types.append(t)
+                elif tier == "TOP":
+                    top_types.append(t)
+
+            # Compute avoid_types_hash
+            avoid_input = "|".join(sorted(avoid_types))
+            avoid_types_hash = f"sha256:{hashlib.sha256(avoid_input.encode()).hexdigest()[:16]}"
+
+            response["content_type_rankings"] = {
+                "rankings": rankings,
+                "avoid_types": avoid_types,
+                "top_types": top_types,
+                "total_types": len(rankings),
+                "avoid_types_hash": avoid_types_hash,
+                "analysis_date": "2026-01-07",
+                "data_age_days": 1,
+                "is_stale": False
+            }
+
+            # Backward compatibility (deprecated)
+            response["top_content_types"] = rankings
+            response["avoid_types"] = avoid_types
+            response["top_types"] = top_types
 
         if include_vault:
             allowed_result = await self.get_allowed_content_types(creator_id)
@@ -144,16 +175,61 @@ class MockMCPClient:
             }
         }
 
-    async def get_content_type_rankings(self, creator_id: str) -> dict:
+    async def get_content_type_rankings(self, creator_id: str, include_metrics: bool = True) -> dict:
+        """Mock content type rankings response with new structure."""
         self._log("get_content_type_rankings")
-        types = []
+
+        rankings = []
+        avoid_types = []
+        top_types = []
+
         for i, t in enumerate(self.config.vault_types):
             tier = "AVOID" if t in self.config.avoid_types else ("TOP" if i < 2 else "MID")
-            types.append({
-                "type_name": t, "performance_tier": tier, "rps": 180 - i * 20,
-                "conversion_rate": 5.5 - i * 0.5, "sends_last_30d": 10 + i,
-            })
-        return {"content_types": types}
+
+            entry = {
+                "type_name": t,
+                "performance_tier": tier,
+            }
+
+            if include_metrics:
+                entry.update({
+                    "rps": 180.0 - i * 20,
+                    "conversion_rate": 5.5 - i * 0.5,
+                    "sends_last_30d": 10 + i,
+                    "total_earnings": 1000.0 - i * 100,
+                    "confidence_score": 0.85
+                })
+
+            rankings.append(entry)
+
+            if tier == "AVOID":
+                avoid_types.append(t)
+            elif tier == "TOP":
+                top_types.append(t)
+
+        # Compute hashes
+        rankings_input = "|".join(sorted([r["type_name"] for r in rankings]))
+        rankings_hash = f"sha256:{hashlib.sha256(rankings_input.encode()).hexdigest()[:16]}"
+
+        avoid_input = "|".join(sorted(avoid_types))
+        avoid_types_hash = f"sha256:{hashlib.sha256(avoid_input.encode()).hexdigest()[:16]}"
+
+        return {
+            "creator_id": creator_id,
+            "rankings": rankings,
+            "avoid_types": avoid_types,
+            "top_types": top_types,
+            "total_types": len(rankings),
+            "metadata": {
+                "fetched_at": "2026-01-08T21:00:00",
+                "rankings_hash": rankings_hash,
+                "avoid_types_hash": avoid_types_hash,
+                "creator_resolved": creator_id,
+                "analysis_date": "2026-01-07",
+                "data_age_days": 1,
+                "is_stale": False
+            }
+        }
 
     async def get_persona_profile(self, creator_id: str) -> dict:
         self._log("get_persona_profile")

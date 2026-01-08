@@ -130,6 +130,21 @@ The EROS Schedule Generator uses an MCP server (`eros-db`) to access the SQLite 
 /mcp call eros-db get_active_creators --tier PREMIUM --limit 50 --offset 0
 ```
 
+### get_content_type_rankings Optimization (v1.4.0)
+
+**New Parameters**:
+- `include_metrics` - Include detailed RPS/conversion metrics (default: True)
+
+**Response Enhancements**:
+- `rankings` - List of content types with tiers (replaces `content_types`)
+- `metadata.rankings_hash` - Hash for ValidationCertificate integrity
+- `metadata.avoid_types_hash` - Hash for HARD GATE verification
+- `metadata.analysis_date` - When performance analysis was run
+- `metadata.data_age_days` - Days since analysis
+- `metadata.is_stale` - True if data > 14 days old
+
+**CRITICAL FIX**: Now filters by latest `analysis_date` to prevent stale data mixing.
+
 ## Tool Usage by Phase
 
 ### Phase 1 - Preflight (4 tools - optimized)

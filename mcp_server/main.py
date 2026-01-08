@@ -490,28 +490,73 @@ def get_creator_profile(
                 "bump_per_day": vol_rows[0].get("bump_per_day") if vol_rows else None
             }
 
-        # Step 5: Get content type rankings (if requested)
+        # Step 5a: Get content type rankings (if requested)
         if include_content_rankings:
+            import hashlib
+            from datetime import date
+
             rankings = db_query("""
                 SELECT
                     content_type as type_name,
                     performance_tier,
                     avg_rps as rps,
                     avg_purchase_rate as conversion_rate,
-                    send_count,
+                    send_count as sends_last_30d,
                     total_earnings,
-                    confidence_score
+                    confidence_score,
+                    analysis_date
                 FROM top_content_types
                 WHERE creator_id = ?
+                  AND analysis_date = (
+                      SELECT MAX(analysis_date)
+                      FROM top_content_types
+                      WHERE creator_id = ?
+                  )
                 ORDER BY avg_rps DESC
-            """, (creator_pk,))
+            """, (creator_pk, creator_pk))
 
             if rankings:
                 data_sources.append("top_content_types")
 
-            response["top_content_types"] = rankings or []
-            response["avoid_types"] = [r["type_name"] for r in rankings if r.get("performance_tier") == "AVOID"]
-            response["top_types"] = [r["type_name"] for r in rankings if r.get("performance_tier") == "TOP"]
+            # Pre-compute tier lists
+            avoid_types = [r["type_name"] for r in rankings if r.get("performance_tier") == "AVOID"]
+            top_types = [r["type_name"] for r in rankings if r.get("performance_tier") == "TOP"]
+
+            # Compute avoid_types_hash for ValidationCertificate
+            avoid_input = "|".join(sorted(avoid_types))
+            avoid_types_hash = f"sha256:{hashlib.sha256(avoid_input.encode()).hexdigest()[:16]}"
+
+            # Get analysis date and staleness
+            analysis_date = rankings[0].get("analysis_date") if rankings else None
+            data_age_days = None
+            is_stale = False
+
+            if analysis_date:
+                try:
+                    if isinstance(analysis_date, str):
+                        analysis_dt = date.fromisoformat(analysis_date)
+                    else:
+                        analysis_dt = analysis_date
+                    data_age_days = (date.today() - analysis_dt).days
+                    is_stale = data_age_days > 14
+                except (ValueError, TypeError):
+                    pass
+
+            response["content_type_rankings"] = {
+                "rankings": rankings or [],
+                "avoid_types": avoid_types,
+                "top_types": top_types,
+                "total_types": len(rankings),
+                "avoid_types_hash": avoid_types_hash,
+                "analysis_date": str(analysis_date) if analysis_date else None,
+                "data_age_days": data_age_days,
+                "is_stale": is_stale
+            }
+
+            # Also keep flat lists at root for backward compatibility
+            response["top_content_types"] = rankings or []  # Deprecated, use content_type_rankings
+            response["avoid_types"] = avoid_types
+            response["top_types"] = top_types
 
         # Step 5b: Get allowed content types (if requested)
         if include_vault:
@@ -989,55 +1034,211 @@ def get_allowed_content_types(
 
 
 @mcp.tool()
-def get_content_type_rankings(creator_id: str) -> dict:
+def get_content_type_rankings(
+    creator_id: str,
+    include_metrics: bool = True
+) -> dict:
     """Returns content type performance rankings with TOP/MID/LOW/AVOID tiers.
 
     MCP Name: mcp__eros-db__get_content_type_rankings
-    HARD GATE DATA - Used for validation
+    HARD GATE DATA - Used for validation (AVOID tier = zero tolerance)
+
+    The AVOID tier is sacred - any content type with performance_tier = 'AVOID'
+    must NEVER appear in a generated schedule. This is one of the four-layer
+    defense system gates.
 
     Args:
-        creator_id: Creator identifier
+        creator_id: Creator identifier (creator_id or page_name)
+        include_metrics: Include detailed RPS, conversion metrics (default: True)
+                        Set False for lightweight validation-only calls
 
     Returns:
-        Content types with performance tiers and metrics
+        Content type rankings for the creator:
+        {
+            "creator_id": str,
+            "rankings": [
+                {
+                    "type_name": str,
+                    "performance_tier": "TOP" | "MID" | "LOW" | "AVOID",
+                    "rps": float,              # if include_metrics
+                    "conversion_rate": float,  # if include_metrics
+                    "sends_last_30d": int,     # if include_metrics
+                    "total_earnings": float,   # if include_metrics
+                    "confidence_score": float  # if include_metrics
+                }
+            ],
+            "avoid_types": [str, ...],      # Pre-computed AVOID list (HARD GATE)
+            "top_types": [str, ...],        # Pre-computed TOP list
+            "total_types": int,
+            "metadata": {
+                "fetched_at": str,
+                "rankings_hash": str,        # For ValidationCertificate
+                "avoid_types_hash": str,     # For HARD GATE verification
+                "creator_resolved": str,
+                "analysis_date": str,        # When analysis was run
+                "data_age_days": int,        # Days since analysis
+                "is_stale": bool             # True if > 14 days old
+            }
+        }
+
+        Error response:
+        {
+            "error": str,
+            "rankings": [],
+            "avoid_types": [],
+            "top_types": [],
+            "total_types": 0,
+            "metadata": {"fetched_at": str, "error": True}
+        }
     """
-    logger.info(f"get_content_type_rankings: creator_id={creator_id}")
+    import hashlib
+    from datetime import date
+
+    logger.info(f"get_content_type_rankings: creator_id={creator_id}, include_metrics={include_metrics}")
+    fetched_at = datetime.now().isoformat()
+
     try:
-        # Verify creator exists
-        creator = db_query(
-            "SELECT creator_id FROM creators WHERE creator_id = ? OR page_name = ? LIMIT 1",
-            (creator_id, creator_id)
-        )
-        if not creator:
-            return {"error": f"Creator not found: {creator_id}", "content_types": []}
+        # ============================================================
+        # STEP 1: RESOLVE CREATOR (use helper like get_allowed_content_types)
+        # ============================================================
+        resolved = resolve_creator_id(creator_id)
+        if not resolved.get("found"):
+            return {
+                "error": f"Creator not found: {creator_id}",
+                "rankings": [],
+                "avoid_types": [],
+                "top_types": [],
+                "total_types": 0,
+                "metadata": {"fetched_at": fetched_at, "error": True}
+            }
 
-        creator_pk = creator[0]['creator_id']
+        creator_pk = resolved["creator_id"]
 
-        # Query top_content_types (actual table name, not content_type_rankings)
-        rankings = db_query("""
-            SELECT content_type as type_name, performance_tier,
-                   avg_rps as rps, avg_purchase_rate as conversion_rate,
-                   send_count as sends_last_30d,
-                   total_earnings, confidence_score
+        # ============================================================
+        # STEP 2: BUILD QUERY (filter by latest analysis_date)
+        # ============================================================
+        select_fields = ["content_type as type_name", "performance_tier", "analysis_date"]
+
+        if include_metrics:
+            select_fields.extend([
+                "avg_rps as rps",
+                "avg_purchase_rate as conversion_rate",
+                "send_count as sends_last_30d",
+                "total_earnings",
+                "confidence_score"
+            ])
+
+        query = f"""
+            SELECT {', '.join(select_fields)}
             FROM top_content_types
             WHERE creator_id = ?
+              AND analysis_date = (
+                  SELECT MAX(analysis_date)
+                  FROM top_content_types
+                  WHERE creator_id = ?
+              )
             ORDER BY avg_rps DESC
-        """, (creator_pk,))
+        """
 
-        avoid_types = [r['type_name'] for r in rankings if r.get('performance_tier') == 'AVOID']
-        top_types = [r['type_name'] for r in rankings if r.get('performance_tier') == 'TOP']
+        rankings = db_query(query, (creator_pk, creator_pk))
 
+        # ============================================================
+        # STEP 3: BUILD RESPONSE LISTS
+        # ============================================================
+        avoid_types = []
+        top_types = []
+        ranking_list = []
+        analysis_date = None
+
+        for r in rankings:
+            # Capture analysis_date from first row
+            if analysis_date is None and r.get("analysis_date"):
+                analysis_date = r["analysis_date"]
+
+            type_name = r.get("type_name", "")
+            tier = r.get("performance_tier", "MID")
+
+            if tier == "AVOID":
+                avoid_types.append(type_name)
+            elif tier == "TOP":
+                top_types.append(type_name)
+
+            # Build ranking entry
+            entry = {
+                "type_name": type_name,
+                "performance_tier": tier
+            }
+
+            if include_metrics:
+                entry.update({
+                    "rps": r.get("rps", 0.0),
+                    "conversion_rate": r.get("conversion_rate", 0.0),
+                    "sends_last_30d": r.get("sends_last_30d", 0),
+                    "total_earnings": r.get("total_earnings", 0.0),
+                    "confidence_score": r.get("confidence_score", 0.0)
+                })
+
+            ranking_list.append(entry)
+
+        # ============================================================
+        # STEP 4: COMPUTE HASHES (for ValidationCertificate)
+        # ============================================================
+        # Rankings hash (all types sorted)
+        all_type_names = sorted([r["type_name"] for r in ranking_list])
+        rankings_input = "|".join(all_type_names)
+        rankings_hash = f"sha256:{hashlib.sha256(rankings_input.encode()).hexdigest()[:16]}"
+
+        # AVOID types hash (critical for HARD GATE verification)
+        avoid_input = "|".join(sorted(avoid_types))
+        avoid_types_hash = f"sha256:{hashlib.sha256(avoid_input.encode()).hexdigest()[:16]}"
+
+        # ============================================================
+        # STEP 5: CALCULATE DATA FRESHNESS
+        # ============================================================
+        data_age_days = None
+        is_stale = False
+
+        if analysis_date:
+            try:
+                if isinstance(analysis_date, str):
+                    analysis_dt = date.fromisoformat(analysis_date)
+                else:
+                    analysis_dt = analysis_date
+                data_age_days = (date.today() - analysis_dt).days
+                is_stale = data_age_days > 14
+            except (ValueError, TypeError):
+                pass
+
+        # ============================================================
+        # STEP 6: BUILD FINAL RESPONSE
+        # ============================================================
         return {
             "creator_id": creator_id,
-            "content_types": rankings,
+            "rankings": ranking_list,
             "avoid_types": avoid_types,
             "top_types": top_types,
-            "total_types": len(rankings)
+            "total_types": len(ranking_list),
+            "metadata": {
+                "fetched_at": fetched_at,
+                "rankings_hash": rankings_hash,
+                "avoid_types_hash": avoid_types_hash,
+                "creator_resolved": creator_pk,
+                "analysis_date": str(analysis_date) if analysis_date else None,
+                "data_age_days": data_age_days,
+                "is_stale": is_stale
+            }
         }
 
     except Exception as e:
         logger.error(f"get_content_type_rankings error: {e}")
-        return {"error": str(e), "content_types": [], "avoid_types": [], "top_types": []}
+        return {
+            "error": str(e),
+            "rankings": [],
+            "avoid_types": [],
+            "top_types": [],
+            "total_types": 0,
+            "metadata": {"fetched_at": fetched_at, "error": True}
+        }
 
 
 @mcp.tool()
