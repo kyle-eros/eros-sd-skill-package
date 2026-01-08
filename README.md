@@ -103,8 +103,8 @@ The skill uses an MCP server (`eros-db`) for database access.
 # List tools
 /mcp tools eros-db
 
-# Test tool
-/mcp call eros-db get_active_creators --limit 5
+# Test tool (now with pagination)
+/mcp call eros-db get_active_creators --limit 5 --sort_by fan_count
 ```
 
 See [MCP Setup Guide](docs/MCP_SETUP_GUIDE.md) for troubleshooting and detailed configuration.

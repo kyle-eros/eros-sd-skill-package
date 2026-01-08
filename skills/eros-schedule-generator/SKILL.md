@@ -53,7 +53,7 @@ Before using tools:
 | Tool | Category | Description | GATE |
 |------|----------|-------------|------|
 | `mcp__eros-db__get_creator_profile` | Creator | **Bundled**: Profile + analytics + volume + rankings | |
-| `mcp__eros-db__get_active_creators` | Creator | List active creators | |
+| `mcp__eros-db__get_active_creators` | Creator | Paginated list with tier/revenue filters | |
 | `mcp__eros-db__get_vault_availability` | Creator | Content type availability | HARD |
 | `mcp__eros-db__get_content_type_rankings` | Creator | Performance tiers (also in bundled) | HARD |
 | `mcp__eros-db__get_persona_profile` | Creator | Tone/archetype settings | |

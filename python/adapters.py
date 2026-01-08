@@ -101,9 +101,43 @@ class ProductionMCPClient:
         )
 
     @with_retry()
-    async def get_active_creators(self, limit: int = 100, tier: str = None) -> dict:
-        """MCP: mcp__eros-db__get_active_creators"""
-        return await self._call("get_active_creators", limit=limit, tier=tier)
+    async def get_active_creators(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+        tier: str = None,
+        page_type: str = None,
+        min_revenue: float = None,
+        max_revenue: float = None,
+        min_fan_count: int = None,
+        sort_by: str = "revenue",
+        sort_order: str = "desc",
+        include_volume_details: bool = False
+    ) -> dict:
+        """MCP: mcp__eros-db__get_active_creators
+
+        Returns paginated list of active creators with comprehensive metrics.
+        Supports filtering by tier, page_type, revenue range, and fan count.
+
+        New in v1.2.0:
+        - Pagination: offset, total_count, has_more
+        - Sorting: sort_by (revenue/fan_count/name/tier), sort_order (asc/desc)
+        - Filters: page_type, min_revenue, max_revenue, min_fan_count
+        - Volume details: include_volume_details flag
+        """
+        return await self._call(
+            "get_active_creators",
+            limit=limit,
+            offset=offset,
+            tier=tier,
+            page_type=page_type,
+            min_revenue=min_revenue,
+            max_revenue=max_revenue,
+            min_fan_count=min_fan_count,
+            sort_by=sort_by,
+            sort_order=sort_order,
+            include_volume_details=include_volume_details
+        )
 
     @with_retry()
     async def get_vault_availability(self, creator_id: str) -> dict:

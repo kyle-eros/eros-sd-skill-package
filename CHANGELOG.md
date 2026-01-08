@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-01-08
+
+### Changed
+- **ENHANCED**: `get_active_creators` now supports pagination and advanced filtering
+  - New params: `offset`, `page_type`, `min_revenue`, `max_revenue`, `min_fan_count`
+  - New params: `sort_by` (revenue/fan_count/name/tier), `sort_order` (asc/desc)
+  - New param: `include_volume_details` for daily volume breakdown
+- Response now includes `total_count`, `metadata.has_more`, `metadata.page_info`
+- Added comprehensive creator fields: display_name, timezone, metrics_snapshot_date
+- Invalid tier/page_type values now return validation error (was silently ignored)
+
+### Added
+- Pagination metadata: `page_info.current_page`, `page_info.total_pages`
+- Flexible sorting with NULL handling (NULLS LAST)
+- Volume details optional inclusion to reduce payload size
+
+---
+
 ## [1.1.0] - 2026-01-08
 
 ### Changed

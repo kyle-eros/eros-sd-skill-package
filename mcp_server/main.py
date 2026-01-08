@@ -536,45 +536,281 @@ def get_creator_profile(
 
 
 @mcp.tool()
-def get_active_creators(limit: int = 100, tier: str = None) -> dict:
-    """Returns list of active creators with basic metrics.
+def get_active_creators(
+    limit: int = 100,
+    offset: int = 0,
+    tier: str = None,
+    page_type: str = None,
+    min_revenue: float = None,
+    max_revenue: float = None,
+    min_fan_count: int = None,
+    sort_by: str = "revenue",
+    sort_order: str = "desc",
+    include_volume_details: bool = False
+) -> dict:
+    """Returns paginated list of active creators with comprehensive metrics.
 
     MCP Name: mcp__eros-db__get_active_creators
 
+    This is the PRIMARY tool for batch/admin operations, creator discovery,
+    tier-based reporting, and multi-creator workflow initialization.
+
     Args:
         limit: Maximum creators to return (default 100, max 500)
-        tier: Optional filter by volume tier (MINIMAL/LITE/STANDARD/HIGH_VALUE/PREMIUM)
+        offset: Pagination offset for large result sets (default 0)
+        tier: Filter by volume tier (Low/Mid/High/Ultra)
+        page_type: Filter by page type ("paid" or "free")
+        min_revenue: Minimum monthly MM revenue filter
+        max_revenue: Maximum monthly MM revenue filter
+        min_fan_count: Minimum fan count filter
+        sort_by: Sort field - "revenue", "fan_count", "name", "tier" (default: "revenue")
+        sort_order: Sort direction - "asc" or "desc" (default: "desc")
+        include_volume_details: Include daily volume breakdown (ppv_per_day, etc.)
 
     Returns:
-        List of active creator summaries
+        {
+            "creators": [
+                {
+                    "creator_id", "page_name", "display_name", "page_type",
+                    "subscription_price", "timezone", "content_category",
+                    "current_fan_count", "mm_revenue_monthly", "volume_tier",
+                    "metrics_snapshot_date", "performance_tier",
+                    "volume_details": {...}  // if include_volume_details=True
+                }
+            ],
+            "count": int,           // Results in this response
+            "total_count": int,     // Total matching records (for pagination)
+            "limit": int,
+            "offset": int,
+            "metadata": {
+                "fetched_at": "ISO timestamp",
+                "filters_applied": {...},
+                "sort": {"by": "revenue", "order": "desc"},
+                "has_more": bool
+            }
+        }
+
+    Example Usage:
+        # Basic: Get top 10 creators by revenue
+        get_active_creators(limit=10)
+
+        # Filtered: Get Ultra tier creators only
+        get_active_creators(tier="Ultra", limit=50)
+
+        # Paginated: Get page 2 of results (items 100-199)
+        get_active_creators(limit=100, offset=100)
+
+        # Complex: High-revenue paid creators sorted by fan count
+        get_active_creators(
+            page_type="paid",
+            min_revenue=3000,
+            sort_by="fan_count",
+            sort_order="desc",
+            include_volume_details=True
+        )
     """
-    logger.info(f"get_active_creators: limit={limit}, tier={tier}")
+    logger.info(f"get_active_creators: limit={limit}, offset={offset}, tier={tier}, "
+                f"page_type={page_type}, sort_by={sort_by}")
+    fetched_at = datetime.now().isoformat()
+
     try:
-        limit = min(max(1, limit), 500)  # Clamp between 1-500
+        # ============================================================
+        # INPUT VALIDATION
+        # ============================================================
 
-        query = """
-            SELECT c.creator_id, c.page_name, c.page_type, c.is_active,
-                   c.current_fan_count, c.current_message_net as mm_revenue_monthly,
+        # Clamp limit between 1-500
+        limit = min(max(1, limit), 500)
+        offset = max(0, offset)
+
+        # Validate tier parameter (actual database values)
+        valid_tiers = ('Low', 'Mid', 'High', 'Ultra')
+        if tier is not None and tier not in valid_tiers:
+            return {
+                "error": f"Invalid tier '{tier}'. Valid values: {', '.join(valid_tiers)}",
+                "creators": [],
+                "count": 0,
+                "total_count": 0,
+                "limit": limit,
+                "offset": offset,
+                "metadata": {"fetched_at": fetched_at, "validation_error": True}
+            }
+
+        # Validate page_type parameter
+        if page_type is not None and page_type not in ('paid', 'free'):
+            return {
+                "error": f"Invalid page_type '{page_type}'. Valid values: paid, free",
+                "creators": [],
+                "count": 0,
+                "total_count": 0,
+                "limit": limit,
+                "offset": offset,
+                "metadata": {"fetched_at": fetched_at, "validation_error": True}
+            }
+
+        # Validate and map sort_by parameter
+        sort_columns = {
+            "revenue": "c.current_message_net",
+            "fan_count": "c.current_fan_count",
+            "name": "c.page_name",
+            "tier": "va.volume_level"
+        }
+        if sort_by not in sort_columns:
+            sort_by = "revenue"  # Default fallback
+
+        # Normalize sort_order
+        sort_order_sql = "ASC" if sort_order.lower() == "asc" else "DESC"
+
+        # ============================================================
+        # BUILD QUERY
+        # ============================================================
+
+        # Base SELECT with comprehensive fields
+        base_select = """
+            SELECT c.creator_id, c.page_name, c.display_name, c.page_type,
+                   c.subscription_price, c.timezone, c.content_category,
+                   c.current_fan_count, c.current_active_fans,
+                   c.current_message_net as mm_revenue_monthly,
+                   c.current_total_earnings,
+                   c.metrics_snapshot_date, c.performance_tier,
                    va.volume_level as volume_tier
-            FROM creators c
-            LEFT JOIN volume_assignments va ON c.creator_id = va.creator_id AND va.is_active = 1
-            WHERE c.is_active = 1
         """
+
+        # Add volume details if requested
+        if include_volume_details:
+            base_select += """,
+                   va.ppv_per_day, va.bump_per_day
+            """
+
+        base_from = """
+            FROM creators c
+            LEFT JOIN volume_assignments va
+                ON c.creator_id = va.creator_id AND va.is_active = 1
+        """
+
+        # Build WHERE clause dynamically
+        where_clauses = ["c.is_active = 1"]
         params = []
+        filters_applied = {}
 
-        if tier and tier in ('MINIMAL', 'LITE', 'STANDARD', 'HIGH_VALUE', 'PREMIUM'):
-            query += " AND va.volume_level = ?"
+        if tier is not None:
+            where_clauses.append("va.volume_level = ?")
             params.append(tier)
+            filters_applied["tier"] = tier
 
-        query += " ORDER BY c.current_message_net DESC LIMIT ?"
-        params.append(limit)
+        if page_type is not None:
+            where_clauses.append("c.page_type = ?")
+            params.append(page_type)
+            filters_applied["page_type"] = page_type
 
-        results = db_query(query, tuple(params))
-        return {"creators": results, "count": len(results), "limit": limit}
+        if min_revenue is not None:
+            where_clauses.append("c.current_message_net >= ?")
+            params.append(min_revenue)
+            filters_applied["min_revenue"] = min_revenue
+
+        if max_revenue is not None:
+            where_clauses.append("c.current_message_net <= ?")
+            params.append(max_revenue)
+            filters_applied["max_revenue"] = max_revenue
+
+        if min_fan_count is not None:
+            where_clauses.append("c.current_fan_count >= ?")
+            params.append(min_fan_count)
+            filters_applied["min_fan_count"] = min_fan_count
+
+        where_sql = " WHERE " + " AND ".join(where_clauses)
+
+        # ============================================================
+        # EXECUTE COUNT QUERY (for pagination metadata)
+        # ============================================================
+
+        count_query = f"SELECT COUNT(*) as total {base_from} {where_sql}"
+        count_result = db_query(count_query, tuple(params))
+        total_count = count_result[0]['total'] if count_result else 0
+
+        # ============================================================
+        # EXECUTE MAIN QUERY
+        # ============================================================
+
+        # Handle NULL values in sort (push to end)
+        order_sql = f" ORDER BY {sort_columns[sort_by]} {sort_order_sql} NULLS LAST"
+        limit_sql = " LIMIT ? OFFSET ?"
+
+        full_query = base_select + base_from + where_sql + order_sql + limit_sql
+        query_params = params + [limit, offset]
+
+        results = db_query(full_query, tuple(query_params))
+
+        # ============================================================
+        # PROCESS RESULTS
+        # ============================================================
+
+        creators = []
+        for row in results:
+            creator_data = {
+                "creator_id": row["creator_id"],
+                "page_name": row["page_name"],
+                "display_name": row.get("display_name"),
+                "page_type": row.get("page_type", "paid"),
+                "subscription_price": row.get("subscription_price"),
+                "timezone": row.get("timezone", "America/Los_Angeles"),
+                "content_category": row.get("content_category"),
+                "current_fan_count": row.get("current_fan_count", 0),
+                "current_active_fans": row.get("current_active_fans", 0),
+                "mm_revenue_monthly": row.get("mm_revenue_monthly", 0),
+                "current_total_earnings": row.get("current_total_earnings", 0),
+                "volume_tier": row.get("volume_tier"),  # May be None if no assignment
+                "metrics_snapshot_date": row.get("metrics_snapshot_date"),
+                "performance_tier": row.get("performance_tier")
+            }
+
+            # Add volume details if requested AND creator has volume assignment
+            if include_volume_details and row.get("volume_tier"):
+                creator_data["volume_details"] = {
+                    "ppv_per_day": row.get("ppv_per_day"),
+                    "bump_per_day": row.get("bump_per_day")
+                }
+
+            creators.append(creator_data)
+
+        # ============================================================
+        # BUILD RESPONSE
+        # ============================================================
+
+        return {
+            "creators": creators,
+            "count": len(creators),
+            "total_count": total_count,
+            "limit": limit,
+            "offset": offset,
+            "metadata": {
+                "fetched_at": fetched_at,
+                "filters_applied": filters_applied if filters_applied else None,
+                "sort": {
+                    "by": sort_by,
+                    "order": sort_order.lower()
+                },
+                "has_more": (offset + len(creators)) < total_count,
+                "page_info": {
+                    "current_page": (offset // limit) + 1 if limit > 0 else 1,
+                    "total_pages": (total_count + limit - 1) // limit if limit > 0 else 1
+                }
+            }
+        }
 
     except Exception as e:
         logger.error(f"get_active_creators error: {e}")
-        return {"error": str(e), "creators": [], "count": 0}
+        return {
+            "error": str(e),
+            "creators": [],
+            "count": 0,
+            "total_count": 0,
+            "limit": limit,
+            "offset": offset,
+            "metadata": {
+                "fetched_at": fetched_at,
+                "error": True
+            }
+        }
 
 
 @mcp.tool()

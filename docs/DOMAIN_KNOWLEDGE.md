@@ -428,7 +428,7 @@ Certificate must be < 5 minutes old at save_schedule time.
 
 | Tool | Category | Purpose |
 |------|----------|---------|
-| `get_active_creators` | Creator | List creators with metrics |
+| `get_active_creators` | Creator | Paginated list with filters (tier, page_type, revenue) |
 | `get_creator_profile` | Creator | **Bundled**: Profile + analytics + volume + rankings (v1.1.0) |
 | `get_persona_profile` | Creator | Tone, archetype, voice |
 | `get_vault_availability` | Creator | Vault content types (HARD GATE) |

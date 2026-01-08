@@ -50,7 +50,7 @@ The EROS Schedule Generator uses an MCP server (`eros-db`) to access the SQLite 
 | Tool | Description | GATE |
 |------|-------------|------|
 | `get_creator_profile` | Profile + analytics + volume + rankings (bundled) | (partial) |
-| `get_active_creators` | List active creators with filters | |
+| `get_active_creators` | **Paginated** list with filters (tier/page_type/revenue) | |
 | `get_vault_availability` | Content types in creator's vault | HARD |
 | `get_content_type_rankings` | Performance tiers (TOP/MID/LOW/AVOID) | HARD |
 | `get_persona_profile` | Tone, archetype, voice settings | |
@@ -106,6 +106,28 @@ The EROS Schedule Generator uses an MCP server (`eros-db`) to access the SQLite 
   "top_types": [ ... ],
   "metadata": { "fetched_at", "data_sources_used", "mcp_calls_saved" }
 }
+```
+
+### get_active_creators Optimization (v1.2.0)
+
+**New Parameters**:
+- `offset` - Pagination support (default: 0)
+- `page_type` - Filter by "paid" or "free"
+- `min_revenue`, `max_revenue` - Revenue range filters
+- `min_fan_count` - Minimum fan count filter
+- `sort_by` - Sort by "revenue", "fan_count", "name", or "tier"
+- `sort_order` - "asc" or "desc"
+- `include_volume_details` - Include ppv_per_day, bump_per_day, etc.
+
+**Response Enhancements**:
+- `total_count` - Total matching records for pagination
+- `metadata.has_more` - Boolean for pagination UI
+- `metadata.page_info` - Current page and total pages
+- Comprehensive creator fields (display_name, timezone, metrics_snapshot_date)
+
+**Example: Paginated tier filter**
+```bash
+/mcp call eros-db get_active_creators --tier PREMIUM --limit 50 --offset 0
 ```
 
 ## Tool Usage by Phase

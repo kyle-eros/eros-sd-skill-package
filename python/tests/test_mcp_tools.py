@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from mcp_server.main import (
     get_creator_profile,
+    get_active_creators,
     validate_creator_id,
     resolve_creator_id,
     get_mm_revenue_with_fallback
@@ -209,6 +210,198 @@ class TestBackwardCompatibility:
         """Test explicit include_analytics=False still works."""
         result = get_creator_profile("maya_hill", include_analytics=False)
         assert "found" in result
+
+
+class TestGetActiveCreatorsOptimized:
+    """Tests for optimized get_active_creators with pagination and filters."""
+
+    def test_basic_call_returns_expected_structure(self):
+        """Verify response contains all expected fields."""
+        result = get_active_creators(limit=5)
+
+        assert "creators" in result
+        assert "count" in result
+        assert "total_count" in result
+        assert "limit" in result
+        assert "offset" in result
+        assert "metadata" in result
+        assert result["limit"] == 5
+        assert result["offset"] == 0
+
+    def test_metadata_structure(self):
+        """Verify metadata contains expected fields."""
+        result = get_active_creators(limit=5)
+        metadata = result.get("metadata", {})
+
+        assert "fetched_at" in metadata
+        assert "sort" in metadata
+        assert "has_more" in metadata
+        assert "page_info" in metadata
+        assert metadata["sort"]["by"] == "revenue"
+        assert metadata["sort"]["order"] == "desc"
+
+    def test_pagination_offset(self):
+        """Verify offset pagination works correctly."""
+        # Get first page
+        page1 = get_active_creators(limit=5, offset=0)
+        # Get second page
+        page2 = get_active_creators(limit=5, offset=5)
+
+        # Verify different results (if enough data)
+        if page1["total_count"] > 5:
+            page1_ids = {c["creator_id"] for c in page1["creators"]}
+            page2_ids = {c["creator_id"] for c in page2["creators"]}
+            assert page1_ids != page2_ids, "Pagination should return different creators"
+
+    def test_tier_filter_valid(self):
+        """Verify valid tier filter works."""
+        result = get_active_creators(tier="High", limit=100)
+
+        assert "error" not in result
+        # All returned creators should have High tier (or None if LEFT JOIN)
+        for creator in result["creators"]:
+            assert creator.get("volume_tier") == "High"
+
+    def test_tier_filter_invalid_returns_error(self):
+        """Verify invalid tier returns validation error."""
+        result = get_active_creators(tier="INVALID_TIER", limit=5)
+
+        assert "error" in result
+        assert "Invalid tier" in result["error"]
+        assert result["count"] == 0
+
+    def test_page_type_filter_valid(self):
+        """Verify page_type filter works."""
+        result = get_active_creators(page_type="paid", limit=100)
+
+        assert "error" not in result
+        for creator in result["creators"]:
+            assert creator.get("page_type") == "paid"
+
+    def test_page_type_filter_invalid_returns_error(self):
+        """Verify invalid page_type returns validation error."""
+        result = get_active_creators(page_type="premium", limit=5)
+
+        assert "error" in result
+        assert "Invalid page_type" in result["error"]
+
+    def test_revenue_range_filter(self):
+        """Verify min/max revenue filters work."""
+        result = get_active_creators(min_revenue=1000, max_revenue=5000, limit=100)
+
+        assert "error" not in result
+        for creator in result["creators"]:
+            revenue = creator.get("mm_revenue_monthly", 0) or 0
+            assert revenue >= 1000, f"Revenue {revenue} below min 1000"
+            assert revenue <= 5000, f"Revenue {revenue} above max 5000"
+
+    def test_sort_by_fan_count_desc(self):
+        """Verify sorting by fan_count descending."""
+        result = get_active_creators(sort_by="fan_count", sort_order="desc", limit=10)
+
+        assert "error" not in result
+        fan_counts = [c.get("current_fan_count", 0) or 0 for c in result["creators"]]
+        assert fan_counts == sorted(fan_counts, reverse=True), "Should be sorted descending"
+
+    def test_sort_by_name_asc(self):
+        """Verify sorting by name ascending."""
+        result = get_active_creators(sort_by="name", sort_order="asc", limit=10)
+
+        assert "error" not in result
+        names = [c.get("page_name", "") for c in result["creators"]]
+        assert names == sorted(names), "Should be sorted alphabetically"
+
+    def test_include_volume_details_false(self):
+        """Verify volume_details not included when flag is False."""
+        result = get_active_creators(include_volume_details=False, limit=5)
+
+        for creator in result["creators"]:
+            assert "volume_details" not in creator
+
+    def test_include_volume_details_true(self):
+        """Verify volume_details included when flag is True."""
+        result = get_active_creators(include_volume_details=True, limit=20)
+
+        # At least one creator with volume assignment should have details
+        creators_with_tier = [c for c in result["creators"] if c.get("volume_tier")]
+        if creators_with_tier:
+            for creator in creators_with_tier:
+                assert "volume_details" in creator
+                assert "ppv_per_day" in creator["volume_details"]
+
+    def test_limit_clamping_max(self):
+        """Verify limit is clamped to 500 max."""
+        result = get_active_creators(limit=1000)
+
+        assert result["limit"] == 500
+
+    def test_limit_clamping_min(self):
+        """Verify limit is clamped to 1 min."""
+        result = get_active_creators(limit=-5)
+
+        assert result["limit"] == 1
+
+    def test_has_more_pagination_flag(self):
+        """Verify has_more is True when more results exist."""
+        result = get_active_creators(limit=1)
+
+        if result["total_count"] > 1:
+            assert result["metadata"]["has_more"] is True
+        else:
+            assert result["metadata"]["has_more"] is False
+
+    def test_combined_filters(self):
+        """Verify multiple filters work together."""
+        result = get_active_creators(
+            tier="Mid",
+            page_type="paid",
+            min_revenue=500,
+            sort_by="fan_count",
+            sort_order="desc",
+            limit=50
+        )
+
+        assert "error" not in result
+        # Verify filters applied in metadata
+        filters = result["metadata"].get("filters_applied", {})
+        assert filters.get("tier") == "Mid"
+        assert filters.get("page_type") == "paid"
+        assert filters.get("min_revenue") == 500
+
+    def test_backward_compatibility_default_params(self):
+        """Verify default params match original behavior."""
+        # Call with no params (like original implementation)
+        result = get_active_creators()
+
+        assert result["limit"] == 100
+        assert result["offset"] == 0
+        assert result["metadata"]["sort"]["by"] == "revenue"
+        assert result["metadata"]["sort"]["order"] == "desc"
+
+    def test_creator_fields_comprehensive(self):
+        """Verify all expected creator fields are present."""
+        result = get_active_creators(limit=1)
+
+        if result["creators"]:
+            creator = result["creators"][0]
+            expected_fields = [
+                "creator_id", "page_name", "page_type",
+                "current_fan_count", "mm_revenue_monthly", "volume_tier"
+            ]
+            for field in expected_fields:
+                assert field in creator, f"Missing field: {field}"
+
+    def test_error_response_structure(self):
+        """Verify error response maintains expected structure."""
+        # Force an error with invalid tier
+        result = get_active_creators(tier="BAD_TIER")
+
+        assert "error" in result
+        assert "creators" in result
+        assert "count" in result
+        assert "metadata" in result
+        assert result["creators"] == []
+        assert result["count"] == 0
 
 
 if __name__ == "__main__":
