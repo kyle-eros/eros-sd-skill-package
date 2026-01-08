@@ -810,7 +810,7 @@ def get_send_type_captions(creator_id: str, send_type: str, limit: int = 10) -> 
     try:
         limit = min(max(1, limit), 50)
 
-        # Map send types to caption categories
+        # Map send types to caption categories (for fallback only)
         category_map = {
             'ppv_unlock': 'ppv',
             'ppv_wall': 'ppv',
@@ -829,18 +829,21 @@ def get_send_type_captions(creator_id: str, send_type: str, limit: int = 10) -> 
         category = category_map.get(send_type, 'general')
 
         # Query caption_bank (actual table name)
+        # Priority: 1) Exact send_type match, 2) Category fallback, 3) General captions
         captions = db_query("""
             SELECT caption_id, caption_text, caption_type as category,
                    performance_tier as quality_score, content_type_id,
                    global_last_used_date as last_used_at
             FROM caption_bank
-            WHERE (caption_type = ? OR caption_type = 'general')
+            WHERE (caption_type = ? OR caption_type = ? OR caption_type = 'general')
             AND is_active = 1
             ORDER BY
-                CASE WHEN caption_type = ? THEN 0 ELSE 1 END,
+                CASE WHEN caption_type = ? THEN 0
+                     WHEN caption_type = ? THEN 1
+                     ELSE 2 END,
                 performance_tier ASC
             LIMIT ?
-        """, (category, category, limit))
+        """, (send_type, category, send_type, category, limit))
 
         return {
             "creator_id": creator_id,
