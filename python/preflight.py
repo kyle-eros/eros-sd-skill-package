@@ -46,7 +46,7 @@ class MCPClient(Protocol):
     """Protocol for MCP client - matches eros-db server tools (15 total)."""
 
     # Creator tools (5)
-    async def get_creator_profile(self, creator_id: str, include_analytics: bool = False) -> dict: ...
+    async def get_creator_profile(self, creator_id: str, include_analytics: bool = True, include_volume: bool = True, include_content_rankings: bool = True) -> dict: ...
     async def get_active_creators(self, limit: int = 100, tier: str = None) -> dict: ...
     async def get_vault_availability(self, creator_id: str) -> dict: ...
     async def get_content_type_rankings(self, creator_id: str) -> dict: ...
@@ -92,17 +92,47 @@ class PreflightEngine:
             persona=raw.get("persona_profile", {}), active_triggers=tuple(triggers),
             pricing_config=self._pricing(raw), timing_slots=timing, health=health,
             generated_at=datetime.now().isoformat(),
-            preflight_duration_ms=(datetime.now()-start).total_seconds()*1000, mcp_calls_made=7)
+            preflight_duration_ms=(datetime.now()-start).total_seconds()*1000, mcp_calls_made=4)
 
     async def _fetch_all(self, cid: str, ws: str) -> dict:
-        results = await asyncio.gather(
-            self.mcp.get_creator_profile(cid), self.mcp.get_volume_config(cid, ws),
-            self.mcp.get_vault_availability(cid), self.mcp.get_content_type_rankings(cid),
-            self.mcp.get_persona_profile(cid), self.mcp.get_active_volume_triggers(cid),
-            self.mcp.get_performance_trends(cid, "14d"), return_exceptions=True)
-        keys = ["creator_profile","volume_config","vault_availability","content_type_rankings",
-                "persona_profile","active_triggers","performance_trends"]
-        return {k: (v if not isinstance(v, Exception) else {}) for k,v in zip(keys, results)}
+        """Fetch all creator data with optimized bundled call."""
+
+        # Use bundled get_creator_profile for efficiency (saves 2-3 MCP calls)
+        profile_bundle = await self.mcp.get_creator_profile(
+            cid,
+            include_analytics=True,
+            include_volume=True,
+            include_content_rankings=True
+        )
+
+        # Parallel fetch remaining data not in bundle
+        remaining_results = await asyncio.gather(
+            self.mcp.get_persona_profile(cid),
+            self.mcp.get_active_volume_triggers(cid),
+            self.mcp.get_performance_trends(cid, "14d"),
+            return_exceptions=True
+        )
+
+        # Reconstruct the raw dict format expected by downstream methods
+        return {
+            "creator_profile": profile_bundle.get("creator", {}),
+            "volume_config": profile_bundle.get("volume_assignment", {}),
+            "vault_availability": {
+                "available_types": [
+                    {"type_name": ct.get("type_name")}
+                    for ct in profile_bundle.get("top_content_types", [])
+                    if ct.get("performance_tier") != "AVOID"
+                ]
+            },
+            "content_type_rankings": {
+                "content_types": profile_bundle.get("top_content_types", [])
+            },
+            "analytics_summary": profile_bundle.get("analytics_summary", {}),
+            "persona_profile": remaining_results[0] if not isinstance(remaining_results[0], Exception) else {},
+            "active_triggers": remaining_results[1] if not isinstance(remaining_results[1], Exception) else [],
+            "performance_trends": remaining_results[2] if not isinstance(remaining_results[2], Exception) else {},
+            "_bundle_metadata": profile_bundle.get("metadata", {})
+        }
 
     def _calc_health(self, raw: dict) -> dict:
         """Death spiral detection from DOMAIN_KNOWLEDGE.md Section 7."""
@@ -279,10 +309,15 @@ class PreflightEngine:
 if __name__ == "__main__":
     import argparse
     class MockMCP:
-        async def get_creator_profile(self, c): return {"is_active": True, "page_type": "paid", "fan_count": 5000}
-        async def get_volume_config(self, c, w): return {"fused_saturation": 45}
-        async def get_vault_availability(self, c): return {"available_types": ["lingerie", "b/g", "solo"]}
-        async def get_content_type_rankings(self, c): return {"content_types": [{"type_name": "lingerie", "performance_tier": "TOP", "rps": 180}]}
+        async def get_creator_profile(self, c, include_analytics=True, include_volume=True, include_content_rankings=True):
+            return {
+                "found": True,
+                "creator": {"is_active": True, "page_type": "paid", "current_fan_count": 5000},
+                "analytics_summary": {"mm_revenue_30d": 2500, "mm_revenue_confidence": "medium"},
+                "volume_assignment": {"volume_level": "STANDARD", "revenue_per_day": [4, 6]},
+                "top_content_types": [{"type_name": "lingerie", "performance_tier": "TOP", "rps": 180}],
+                "metadata": {"mcp_calls_saved": 3}
+            }
         async def get_persona_profile(self, c): return {"primary_tone": "GFE"}
         async def get_active_volume_triggers(self, c): return []
         async def get_performance_trends(self, c, p): return {"saturation_score": 45, "consecutive_decline_weeks": 0}

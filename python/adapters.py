@@ -53,7 +53,7 @@ class ProductionMCPClient:
 
     MCP Server: eros-db
     Tool Naming: mcp__eros-db__<tool-name>
-    Total Tools: 14
+    Total Tools: 15 (get_creator_profile now bundled with analytics+volume+rankings)
     """
 
     def __init__(self, mcp_tools: Any, retry_config: RetryConfig = None):
@@ -80,9 +80,25 @@ class ProductionMCPClient:
     # ============================================================
 
     @with_retry()
-    async def get_creator_profile(self, creator_id: str, include_analytics: bool = False) -> dict:
-        """MCP: mcp__eros-db__get_creator_profile"""
-        return await self._call("get_creator_profile", creator_id=creator_id, include_analytics=include_analytics)
+    async def get_creator_profile(
+        self,
+        creator_id: str,
+        include_analytics: bool = True,
+        include_volume: bool = True,
+        include_content_rankings: bool = True
+    ) -> dict:
+        """MCP: mcp__eros-db__get_creator_profile (bundled)
+
+        Returns comprehensive bundle with analytics, volume, and content rankings.
+        Reduces preflight from 7 MCP calls to 4.
+        """
+        return await self._call(
+            "get_creator_profile",
+            creator_id=creator_id,
+            include_analytics=include_analytics,
+            include_volume=include_volume,
+            include_content_rankings=include_content_rankings
+        )
 
     @with_retry()
     async def get_active_creators(self, limit: int = 100, tier: str = None) -> dict:

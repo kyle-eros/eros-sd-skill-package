@@ -24,6 +24,7 @@ IMPORTANT: This server uses ACTUAL table names from the database:
 import os
 import sys
 import json
+import re
 import sqlite3
 import logging
 from pathlib import Path
@@ -116,63 +117,422 @@ def safe_get(d: dict, key: str, default=None):
 
 
 # ============================================================
+# CREATOR RESOLUTION HELPERS
+# ============================================================
+
+def validate_creator_id(creator_id: str) -> tuple[bool, str]:
+    """Validate creator_id format.
+
+    Returns:
+        (is_valid, error_message or cleaned_id)
+    """
+    if not creator_id:
+        return False, "creator_id cannot be empty"
+
+    # Strip whitespace
+    cleaned = creator_id.strip()
+
+    # Check length
+    if len(cleaned) < 2 or len(cleaned) > 100:
+        return False, f"creator_id length must be 2-100 chars, got {len(cleaned)}"
+
+    # Allow alphanumeric, underscore, hyphen only
+    if not re.match(r'^[a-zA-Z0-9_-]+$', cleaned):
+        return False, f"creator_id contains invalid characters: {cleaned}"
+
+    return True, cleaned
+
+
+def resolve_creator_id(creator_id: str) -> dict:
+    """Resolve creator_id or page_name to full creator record.
+
+    Returns:
+        {"found": True, "creator_id": str, "page_name": str, ...} or
+        {"found": False, "error": str}
+    """
+    is_valid, result = validate_creator_id(creator_id)
+    if not is_valid:
+        return {"found": False, "error": result}
+
+    cleaned_id = result
+
+    try:
+        # Try exact creator_id match first, then page_name
+        results = db_query(
+            """SELECT creator_id, page_name, display_name, is_active
+               FROM creators
+               WHERE creator_id = ? OR page_name = ?
+               LIMIT 1""",
+            (cleaned_id, cleaned_id)
+        )
+
+        if not results:
+            # Try case-insensitive page_name match
+            results = db_query(
+                """SELECT creator_id, page_name, display_name, is_active
+                   FROM creators
+                   WHERE LOWER(page_name) = LOWER(?)
+                   LIMIT 1""",
+                (cleaned_id,)
+            )
+
+        if not results:
+            return {"found": False, "error": f"Creator not found: {creator_id}"}
+
+        row = results[0]
+        return {
+            "found": True,
+            "creator_id": row["creator_id"],
+            "page_name": row["page_name"],
+            "display_name": row.get("display_name"),
+            "is_active": row.get("is_active", True)
+        }
+
+    except Exception as e:
+        logger.error(f"resolve_creator_id error: {e}")
+        return {"found": False, "error": f"Database error: {str(e)}"}
+
+
+def get_mm_revenue_with_fallback(creator_id: str) -> dict:
+    """Get MM revenue using 3-level fallback chain.
+
+    Fallback levels:
+        1. Recent mass_messages (≤7 days old, ≥3 messages) - HIGH confidence
+        2. creators.current_message_net + current_posts_net - MEDIUM confidence
+        3. Fan count estimate (fan_count × $2.50) - LOW confidence
+
+    Returns:
+        {
+            "mm_revenue_30d": float,
+            "mm_revenue_confidence": "high" | "medium" | "low",
+            "mm_revenue_source": str,
+            "mm_data_age_days": int | None,
+            "mm_message_count_30d": int
+        }
+    """
+    try:
+        # Level 1: Try recent mass_messages aggregation
+        level1 = db_query("""
+            SELECT
+                SUM(earnings) as total_earnings,
+                COUNT(*) as message_count,
+                MAX(imported_at) as last_import,
+                julianday('now') - julianday(MAX(imported_at)) as days_since_last
+            FROM mass_messages
+            WHERE creator_id = ?
+            AND imported_at >= date('now', '-30 days')
+        """, (creator_id,))
+
+        if level1 and level1[0].get('message_count', 0) >= 3:
+            row = level1[0]
+            days_old = row.get('days_since_last') or 0
+
+            if days_old <= 7:  # Data is fresh enough
+                return {
+                    "mm_revenue_30d": round(row.get('total_earnings', 0) or 0, 2),
+                    "mm_revenue_confidence": "high",
+                    "mm_revenue_source": "mass_messages_30d",
+                    "mm_data_age_days": int(days_old),
+                    "mm_message_count_30d": row.get('message_count', 0)
+                }
+
+        # Level 2: Use creator's stored metrics
+        level2 = db_query("""
+            SELECT
+                current_message_net,
+                current_posts_net,
+                current_total_earnings,
+                metrics_snapshot_date,
+                julianday('now') - julianday(metrics_snapshot_date) as days_old
+            FROM creators
+            WHERE creator_id = ?
+        """, (creator_id,))
+
+        if level2 and level2[0]:
+            row = level2[0]
+            msg_net = row.get('current_message_net') or 0
+            posts_net = row.get('current_posts_net') or 0
+
+            if msg_net > 0 or posts_net > 0:
+                days_old = row.get('days_old')
+                return {
+                    "mm_revenue_30d": round(msg_net + posts_net, 2),
+                    "mm_revenue_confidence": "medium",
+                    "mm_revenue_source": "creator_metrics",
+                    "mm_data_age_days": int(days_old) if days_old else None,
+                    "mm_message_count_30d": level1[0].get('message_count', 0) if level1 else 0
+                }
+
+        # Level 3: Fan count estimate
+        level3 = db_query(
+            "SELECT current_fan_count FROM creators WHERE creator_id = ?",
+            (creator_id,)
+        )
+
+        fan_count = (level3[0].get('current_fan_count', 0) if level3 else 0) or 0
+        estimated_revenue = fan_count * 2.50  # $2.50 per fan estimate
+
+        return {
+            "mm_revenue_30d": round(estimated_revenue, 2),
+            "mm_revenue_confidence": "low",
+            "mm_revenue_source": "fan_count_estimate",
+            "mm_data_age_days": None,
+            "mm_message_count_30d": 0
+        }
+
+    except Exception as e:
+        logger.error(f"get_mm_revenue_with_fallback error: {e}")
+        return {
+            "mm_revenue_30d": 0,
+            "mm_revenue_confidence": "error",
+            "mm_revenue_source": f"error: {str(e)}",
+            "mm_data_age_days": None,
+            "mm_message_count_30d": 0
+        }
+
+
+# ============================================================
 # CREATOR TOOLS (5)
 # ============================================================
 
 @mcp.tool()
-def get_creator_profile(creator_id: str, include_analytics: bool = False) -> dict:
-    """Retrieves comprehensive creator profile including preferences and metrics.
+def get_creator_profile(
+    creator_id: str,
+    include_analytics: bool = True,
+    include_volume: bool = True,
+    include_content_rankings: bool = True
+) -> dict:
+    """Retrieves comprehensive creator profile with analytics, volume, and content rankings.
 
     MCP Name: mcp__eros-db__get_creator_profile
 
+    This is the PRIMARY data-fetching tool for pipeline preflight. Returns a bundled
+    response to minimize MCP calls during execution.
+
     Args:
-        creator_id: Unique identifier for the creator (creator_id or page_name)
-        include_analytics: Include 30-day analytics in response
+        creator_id: Creator identifier (creator_id or page_name)
+        include_analytics: Include 30-day performance metrics with confidence (default: True)
+        include_volume: Include volume tier and daily distribution (default: True)
+        include_content_rankings: Include TOP/MID/LOW/AVOID content types (default: True)
 
     Returns:
-        Creator profile with optional analytics data
+        Comprehensive profile bundle:
+        {
+            "found": bool,
+            "creator": {
+                "creator_id", "page_name", "display_name", "page_type",
+                "subscription_price", "timezone", "content_category",
+                "current_fan_count", "current_total_earnings",
+                "is_active", "base_price"
+            },
+            "analytics_summary": {  # if include_analytics=True
+                "mm_revenue_30d", "mm_revenue_confidence", "mm_revenue_source",
+                "mm_data_age_days", "mm_message_count_30d",
+                "avg_rps", "avg_conversion", "avg_open_rate",
+                "total_sends", "total_earnings"
+            },
+            "volume_assignment": {  # if include_volume=True
+                "volume_level", "revenue_per_day", "engagement_per_day",
+                "retention_per_day", "ppv_per_day", "bump_per_day"
+            },
+            "top_content_types": [  # if include_content_rankings=True
+                {"type_name", "performance_tier", "rps", "conversion_rate", "send_count"}
+            ],
+            "metadata": {
+                "fetched_at", "data_sources_used", "mcp_calls_saved"
+            }
+        }
     """
-    logger.info(f"get_creator_profile: creator_id={creator_id}, include_analytics={include_analytics}")
+    logger.info(f"get_creator_profile: creator_id={creator_id}, analytics={include_analytics}, volume={include_volume}, rankings={include_content_rankings}")
+
+    fetched_at = datetime.now().isoformat()
+    data_sources = []
+
+    # Step 1: Resolve and validate creator
+    resolved = resolve_creator_id(creator_id)
+    if not resolved.get("found"):
+        return {
+            "found": False,
+            "error": resolved.get("error", f"Creator not found: {creator_id}"),
+            "creator": None
+        }
+
+    creator_pk = resolved["creator_id"]
+    data_sources.append("creators")
+
     try:
-        results = db_query(
-            "SELECT * FROM creators WHERE creator_id = ? OR page_name = ? LIMIT 1",
-            (creator_id, creator_id)
-        )
+        # Step 2: Get full creator profile
+        creator_rows = db_query("""
+            SELECT
+                c.creator_id, c.page_name, c.display_name, c.page_type,
+                c.subscription_price, c.timezone, c.content_category,
+                c.current_fan_count, c.current_active_fans,
+                c.current_total_earnings, c.current_message_net, c.current_posts_net,
+                c.is_active, c.metrics_snapshot_date, c.performance_tier
+            FROM creators c
+            WHERE c.creator_id = ?
+        """, (creator_pk,))
 
-        if not results:
-            return {"error": f"Creator not found: {creator_id}", "found": False}
+        if not creator_rows:
+            return {"found": False, "error": f"Creator data not found: {creator_id}", "creator": None}
 
-        profile = dict(results[0])
-        profile["found"] = True
+        creator_data = dict(creator_rows[0])
 
+        # Build response
+        response = {
+            "found": True,
+            "creator": {
+                "creator_id": creator_data["creator_id"],
+                "page_name": creator_data["page_name"],
+                "display_name": creator_data.get("display_name"),
+                "page_type": creator_data.get("page_type", "paid"),
+                "subscription_price": creator_data.get("subscription_price"),
+                "timezone": creator_data.get("timezone", "America/Los_Angeles"),
+                "content_category": creator_data.get("content_category", "softcore"),
+                "current_fan_count": creator_data.get("current_fan_count", 0),
+                "current_active_fans": creator_data.get("current_active_fans", 0),
+                "current_total_earnings": creator_data.get("current_total_earnings", 0),
+                "is_active": creator_data.get("is_active", True),
+                "performance_tier": creator_data.get("performance_tier", 3)
+            }
+        }
+
+        # Step 3: Get analytics with fallback (if requested)
         if include_analytics:
-            creator_pk = profile.get('creator_id')
-            if creator_pk:
-                analytics = db_query("""
-                    SELECT
-                        CASE WHEN SUM(purchased_count) > 0
-                             THEN SUM(earnings) / SUM(purchased_count)
-                             ELSE 0 END as avg_rps,
-                        CASE WHEN SUM(viewed_count) > 0
-                             THEN 1.0 * SUM(purchased_count) / SUM(viewed_count)
-                             ELSE 0 END as avg_conversion,
-                        CASE WHEN SUM(sent_count) > 0
-                             THEN 1.0 * SUM(viewed_count) / SUM(sent_count)
-                             ELSE 0 END as avg_open_rate,
-                        SUM(earnings) as total_earnings,
-                        COUNT(*) as total_sends
-                    FROM mass_messages
-                    WHERE creator_id = ?
-                    AND imported_at >= date('now', '-30 days')
-                """, (creator_pk,))
-                if analytics:
-                    profile['analytics_30d'] = dict(analytics[0])
+            # Get MM revenue with 3-level fallback
+            mm_revenue = get_mm_revenue_with_fallback(creator_pk)
+            data_sources.append(mm_revenue["mm_revenue_source"])
 
-        return profile
+            # Get additional performance metrics
+            perf_metrics = db_query("""
+                SELECT
+                    CASE WHEN SUM(purchased_count) > 0
+                         THEN SUM(earnings) / SUM(purchased_count)
+                         ELSE 0 END as avg_rps,
+                    CASE WHEN SUM(viewed_count) > 0
+                         THEN 1.0 * SUM(purchased_count) / SUM(viewed_count)
+                         ELSE 0 END as avg_conversion,
+                    CASE WHEN SUM(sent_count) > 0
+                         THEN 1.0 * SUM(viewed_count) / SUM(sent_count)
+                         ELSE 0 END as avg_open_rate,
+                    SUM(earnings) as total_earnings,
+                    COUNT(*) as total_sends
+                FROM mass_messages
+                WHERE creator_id = ?
+                AND imported_at >= date('now', '-30 days')
+            """, (creator_pk,))
+
+            perf = perf_metrics[0] if perf_metrics else {}
+
+            response["analytics_summary"] = {
+                "mm_revenue_30d": mm_revenue["mm_revenue_30d"],
+                "mm_revenue_confidence": mm_revenue["mm_revenue_confidence"],
+                "mm_revenue_source": mm_revenue["mm_revenue_source"],
+                "mm_data_age_days": mm_revenue["mm_data_age_days"],
+                "mm_message_count_30d": mm_revenue["mm_message_count_30d"],
+                "avg_rps": round(perf.get("avg_rps", 0) or 0, 2),
+                "avg_conversion": round(perf.get("avg_conversion", 0) or 0, 4),
+                "avg_open_rate": round(perf.get("avg_open_rate", 0) or 0, 4),
+                "total_earnings": round(perf.get("total_earnings", 0) or 0, 2),
+                "total_sends": perf.get("total_sends", 0) or 0
+            }
+
+        # Step 4: Get volume assignment (if requested)
+        if include_volume:
+            vol_rows = db_query("""
+                SELECT
+                    va.volume_level, va.ppv_per_day, va.bump_per_day,
+                    va.is_active as vol_active
+                FROM volume_assignments va
+                WHERE va.creator_id = ? AND va.is_active = 1
+                ORDER BY va.assigned_at DESC
+                LIMIT 1
+            """, (creator_pk,))
+
+            # Calculate tier from revenue if not in volume_assignments
+            mm_rev = response.get("analytics_summary", {}).get("mm_revenue_30d", 0) if include_analytics else (creator_data.get("current_message_net", 0) or 0)
+
+            if vol_rows:
+                vol = vol_rows[0]
+                tier = vol.get("volume_level", "STANDARD")
+                data_sources.append("volume_assignments")
+            else:
+                # Calculate from revenue
+                if mm_rev < 150: tier = "MINIMAL"
+                elif mm_rev < 800: tier = "LITE"
+                elif mm_rev < 3000: tier = "STANDARD"
+                elif mm_rev < 8000: tier = "HIGH_VALUE"
+                else: tier = "PREMIUM"
+
+            # Tier volume ranges
+            tier_config = {
+                "MINIMAL": {"rev": (1, 2), "eng": (1, 2), "ret": (1, 1)},
+                "LITE": {"rev": (2, 4), "eng": (2, 4), "ret": (1, 2)},
+                "STANDARD": {"rev": (4, 6), "eng": (4, 6), "ret": (2, 3)},
+                "HIGH_VALUE": {"rev": (6, 9), "eng": (5, 8), "ret": (2, 4)},
+                "PREMIUM": {"rev": (8, 12), "eng": (6, 10), "ret": (3, 5)}
+            }
+            ranges = tier_config.get(tier, tier_config["STANDARD"])
+
+            response["volume_assignment"] = {
+                "volume_level": tier,
+                "mm_revenue_used": mm_rev,
+                "revenue_per_day": list(ranges["rev"]),
+                "engagement_per_day": list(ranges["eng"]),
+                "retention_per_day": list(ranges["ret"]),
+                "ppv_per_day": vol_rows[0].get("ppv_per_day") if vol_rows else None,
+                "bump_per_day": vol_rows[0].get("bump_per_day") if vol_rows else None
+            }
+
+        # Step 5: Get content type rankings (if requested)
+        if include_content_rankings:
+            rankings = db_query("""
+                SELECT
+                    content_type as type_name,
+                    performance_tier,
+                    avg_rps as rps,
+                    avg_purchase_rate as conversion_rate,
+                    send_count,
+                    total_earnings,
+                    confidence_score
+                FROM top_content_types
+                WHERE creator_id = ?
+                ORDER BY avg_rps DESC
+            """, (creator_pk,))
+
+            if rankings:
+                data_sources.append("top_content_types")
+
+            response["top_content_types"] = rankings or []
+            response["avoid_types"] = [r["type_name"] for r in rankings if r.get("performance_tier") == "AVOID"]
+            response["top_types"] = [r["type_name"] for r in rankings if r.get("performance_tier") == "TOP"]
+
+        # Step 6: Add metadata
+        mcp_calls_saved = 0
+        if include_analytics: mcp_calls_saved += 1
+        if include_volume: mcp_calls_saved += 1
+        if include_content_rankings: mcp_calls_saved += 1
+
+        response["metadata"] = {
+            "fetched_at": fetched_at,
+            "data_sources_used": list(set(data_sources)),
+            "mcp_calls_saved": mcp_calls_saved,
+            "include_flags": {
+                "analytics": include_analytics,
+                "volume": include_volume,
+                "content_rankings": include_content_rankings
+            }
+        }
+
+        return response
 
     except Exception as e:
         logger.error(f"get_creator_profile error: {e}")
-        return {"error": str(e), "found": False}
+        return {
+            "found": False,
+            "error": str(e),
+            "creator": None
+        }
 
 
 @mcp.tool()

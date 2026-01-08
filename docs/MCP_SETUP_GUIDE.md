@@ -1,7 +1,7 @@
 # EROS MCP Setup Guide
 
-**Version**: 1.1.0
-**Last Updated**: 2026-01-06
+**Version**: 1.2.0
+**Last Updated**: 2026-01-08
 **Server**: eros-db
 
 ## Overview
@@ -49,7 +49,7 @@ The EROS Schedule Generator uses an MCP server (`eros-db`) to access the SQLite 
 
 | Tool | Description | GATE |
 |------|-------------|------|
-| `get_creator_profile` | Profile with optional 30-day analytics | |
+| `get_creator_profile` | Profile + analytics + volume + rankings (bundled) | (partial) |
 | `get_active_creators` | List active creators with filters | |
 | `get_vault_availability` | Content types in creator's vault | HARD |
 | `get_content_type_rankings` | Performance tiers (TOP/MID/LOW/AVOID) | HARD |
@@ -80,16 +80,44 @@ The EROS Schedule Generator uses an MCP server (`eros-db`) to access the SQLite 
 | `get_send_types` | 22-type taxonomy with constraints (full details) |
 | `get_send_types_constraints` | Lightweight constraints for schedule generation (**preferred**) |
 
+### get_creator_profile Optimization
+
+**Optimization Note**: `get_creator_profile` now returns bundled data by default:
+- `include_analytics=True` - 30-day metrics with 3-level MM revenue fallback
+- `include_volume=True` - Volume tier assignment with daily ranges
+- `include_content_rankings=True` - TOP/MID/LOW/AVOID content types
+
+**This reduces preflight from 7 MCP calls to 4.**
+
+**Return Structure**:
+```json
+{
+  "found": true,
+  "creator": { "creator_id", "page_name", "page_type", ... },
+  "analytics_summary": {
+    "mm_revenue_30d", "mm_revenue_confidence", "mm_revenue_source",
+    "mm_data_age_days", "avg_rps", "avg_open_rate", ...
+  },
+  "volume_assignment": {
+    "volume_level", "revenue_per_day", "engagement_per_day", ...
+  },
+  "top_content_types": [ { "type_name", "performance_tier", "rps", ... } ],
+  "avoid_types": [ ... ],
+  "top_types": [ ... ],
+  "metadata": { "fetched_at", "data_sources_used", "mcp_calls_saved" }
+}
+```
+
 ## Tool Usage by Phase
 
-### Phase 1 - Preflight (5 tools)
+### Phase 1 - Preflight (4 tools - optimized)
 ```
-get_creator_profile     → Creator metadata
-get_volume_config       → Volume tier configuration
-get_vault_availability  → HARD GATE data
-get_content_type_rankings → HARD GATE data
+get_creator_profile     → Creator + Analytics + Volume + Rankings (BUNDLED)
 get_persona_profile     → Caption styling
+get_active_volume_triggers → Performance triggers
+get_performance_trends  → Health and saturation metrics
 ```
+**Note**: `get_creator_profile` replaces separate calls to `get_volume_config`, `get_vault_availability`, and `get_content_type_rankings`.
 
 ### Phase 2 - Generate (3 tools)
 ```
@@ -266,4 +294,4 @@ Key tables:
 ---
 
 *EROS Schedule Generator MCP Documentation*
-*Server: eros-db | Tools: 15 | MCP Spec: 2025-11-25*
+*Server: eros-db | Tools: 15 | MCP Spec: 2025-11-25 | get_creator_profile v2 (bundled)*
