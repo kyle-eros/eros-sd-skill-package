@@ -52,6 +52,11 @@
 
 ## 2. Volume Tiers
 
+> **Implementation Note**: Canonical tier thresholds are defined in
+> `mcp_server/volume_utils.py`. All consumers (`get_volume_config`,
+> `get_creator_profile`, `preflight.py`) import from this single source of truth.
+> This eliminates the risk of threshold drift between components.
+
 ### Revenue-Based Tiers (MM Revenue = posts_net + message_net)
 
 | Tier | MM Revenue/Month | Revenue/Day | Engagement/Day | Retention/Day |

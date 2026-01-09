@@ -1,6 +1,6 @@
 # EROS MCP Setup Guide
 
-**Version**: 1.5.0
+**Version**: 1.6.0
 **Last Updated**: 2026-01-08
 **Server**: eros-db
 
@@ -166,6 +166,94 @@ The EROS Schedule Generator uses an MCP server (`eros-db`) to access the SQLite 
 - `metadata.is_stale` - True if data > 14 days old
 
 **CRITICAL FIX**: Now filters by latest `analysis_date` to prevent stale data mixing.
+
+### get_volume_config Enhancement (v1.6.0)
+
+The `get_volume_config` tool has been enhanced from a simple tier lookup to a
+comprehensive **Volume Service** that returns pre-calculated weekly configurations.
+
+**Key Differentiator from bundled response:**
+- `get_creator_profile` -> Returns raw tier + ranges
+- `get_volume_config` -> Returns CALCULATED weekly plan with all adjustments applied
+
+#### New Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `include_trigger_breakdown` | bool | False | Include trigger_details array for auditing |
+| `trigger_overrides` | list[dict] | None | Simulate triggers without DB lookup |
+| `tier_override` | str | None | Force specific tier for simulation |
+| `health_override` | dict | None | Override health status for simulation |
+
+#### Response Schema
+
+```json
+{
+  "creator_id": "alexia",
+  "week_start": "2026-01-06",
+  "tier": "STANDARD",
+  "tier_source": "mm_revenue",
+  "tier_confidence": "high",
+  "base_ranges": {
+    "revenue": [4, 6],
+    "engagement": [4, 6],
+    "retention": [2, 3]
+  },
+  "trigger_multiplier": 1.2,
+  "triggers_applied": 1,
+  "health": {
+    "status": "HEALTHY",
+    "saturation_score": 45,
+    "volume_adjustment": 0
+  },
+  "weekly_distribution": {
+    "monday": {
+      "date": "2026-01-06",
+      "revenue": 5,
+      "engagement": 5,
+      "retention": 2,
+      "calendar_boost": 1.0,
+      "weekend_boost": 1.0,
+      "day_multiplier": 1.2
+    }
+  },
+  "calendar_boosts": [
+    {"date": "2026-01-15", "boost": 1.2, "reason": "payday"}
+  ],
+  "temporal_context": {
+    "week_type": "current",
+    "data_accuracy": {...}
+  },
+  "metadata": {
+    "volume_config_hash": "sha256:abc123...",
+    "hash_inputs": ["tier:STANDARD", "week:2026-01-06", ...]
+  }
+}
+```
+
+#### Usage Examples
+
+```python
+# Standard usage for schedule generation
+get_volume_config("alexia", "2026-01-06")
+
+# Simulation mode - test trigger scenarios
+get_volume_config("alexia", "2026-01-06",
+    trigger_overrides=[{"trigger_type": "HIGH_PERFORMER", "adjustment_multiplier": 1.2}],
+    tier_override="PREMIUM")
+
+# Debug mode with full breakdown
+get_volume_config("alexia", "2026-01-06", include_trigger_breakdown=True)
+
+# Historical reconstruction
+get_volume_config("alexia", "2025-12-01")  # Past week, calendar exact
+```
+
+#### Implementation Note
+
+Canonical tier thresholds are defined in `mcp_server/volume_utils.py`. All consumers
+(`get_volume_config`, `get_creator_profile`, `preflight.py`) import from this single
+source of truth, eliminating the risk of threshold drift between components.
 
 ## Tool Usage by Phase
 
@@ -352,4 +440,4 @@ Key tables:
 ---
 
 *EROS Schedule Generator MCP Documentation*
-*Server: eros-db | Tools: 15 | MCP Spec: 2025-11-25 | get_creator_profile v3 (bundled with persona)*
+*Server: eros-db | Tools: 15 | MCP Spec: 2025-11-25 | get_volume_config v1.6.0 (enhanced)*

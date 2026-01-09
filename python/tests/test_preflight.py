@@ -2,8 +2,17 @@
 from __future__ import annotations
 import pytest
 from datetime import datetime
-from ..preflight import PreflightEngine, TIERS, TIER_ORDER
+from ..preflight import PreflightEngine, TIERS, TIER_ORDER, PRIME_HOURS, HOLIDAYS, BUMP_MULT
 from .mocks import MockMCPClient, TestDataFactory, CreatorConfig
+
+# Import canonical constants for identity verification
+from mcp_server.volume_utils import (
+    TIERS as CANONICAL_TIERS,
+    TIER_ORDER as CANONICAL_TIER_ORDER,
+    PRIME_HOURS as CANONICAL_PRIME_HOURS,
+    HOLIDAYS as CANONICAL_HOLIDAYS,
+    BUMP_MULT as CANONICAL_BUMP_MULT,
+)
 
 
 class TestVolumeTiers:
@@ -240,3 +249,67 @@ class TestPreflightExecution:
         # Verify get_persona_profile was NOT called (persona comes from bundle)
         assert "get_persona_profile" not in mcp.call_log
         assert "get_creator_profile" in mcp.call_log
+
+
+class TestCanonicalTierUsage:
+    """Verify preflight.py uses canonical tier definitions from volume_utils.
+
+    BUG 1 ELIMINATION: These tests ensure preflight.py imports constants from
+    mcp_server/volume_utils.py rather than defining duplicates locally.
+    This prevents drift between the two files.
+    """
+
+    def test_preflight_uses_canonical_tiers(self):
+        """Verify preflight.py uses the canonical TIERS definition."""
+        # Should be the same object (imported, not copied)
+        assert TIERS is CANONICAL_TIERS, (
+            "preflight.TIERS must be imported from volume_utils, not defined locally"
+        )
+
+    def test_preflight_uses_canonical_tier_order(self):
+        """Verify preflight.py uses the canonical TIER_ORDER definition."""
+        # Should be the same object (imported, not copied)
+        assert TIER_ORDER is CANONICAL_TIER_ORDER, (
+            "preflight.TIER_ORDER must be imported from volume_utils, not defined locally"
+        )
+
+    def test_preflight_uses_canonical_prime_hours(self):
+        """Verify preflight.py uses the canonical PRIME_HOURS definition."""
+        assert PRIME_HOURS is CANONICAL_PRIME_HOURS, (
+            "preflight.PRIME_HOURS must be imported from volume_utils, not defined locally"
+        )
+
+    def test_preflight_uses_canonical_holidays(self):
+        """Verify preflight.py uses the canonical HOLIDAYS definition."""
+        assert HOLIDAYS is CANONICAL_HOLIDAYS, (
+            "preflight.HOLIDAYS must be imported from volume_utils, not defined locally"
+        )
+
+    def test_preflight_uses_canonical_bump_mult(self):
+        """Verify preflight.py uses the canonical BUMP_MULT definition."""
+        assert BUMP_MULT is CANONICAL_BUMP_MULT, (
+            "preflight.BUMP_MULT must be imported from volume_utils, not defined locally"
+        )
+
+    def test_tier_thresholds_consistent(self):
+        """Verify tier thresholds match expected values (spot check for correctness)."""
+        # Spot check key thresholds to catch any accidental modifications
+        assert TIERS["MINIMAL"][0] == 0, "MINIMAL min revenue should be 0"
+        assert TIERS["LITE"][0] == 150, "LITE min revenue should be 150"
+        assert TIERS["STANDARD"][0] == 800, "STANDARD min revenue should be 800"
+        assert TIERS["HIGH_VALUE"][0] == 3000, "HIGH_VALUE min revenue should be 3000"
+        assert TIERS["PREMIUM"][0] == 8000, "PREMIUM min revenue should be 8000"
+
+    def test_tier_order_has_correct_sequence(self):
+        """Verify TIER_ORDER has all tiers in correct ascending order."""
+        expected_order = ("MINIMAL", "LITE", "STANDARD", "HIGH_VALUE", "PREMIUM")
+        assert TIER_ORDER == expected_order, (
+            f"TIER_ORDER should be {expected_order}, got {TIER_ORDER}"
+        )
+
+    def test_all_holidays_present(self):
+        """Verify all expected holidays are in HOLIDAYS set."""
+        expected_holidays = {(1, 1), (2, 14), (7, 4), (10, 31), (12, 25)}
+        assert expected_holidays.issubset(HOLIDAYS), (
+            f"Missing holidays: {expected_holidays - HOLIDAYS}"
+        )

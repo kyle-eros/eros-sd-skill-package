@@ -5,6 +5,49 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2026-01-08
+
+### Added
+- `mcp_server/volume_utils.py` - Single source of truth for tier calculations
+- Enhanced `get_volume_config` with week-specific weekly_distribution
+- Simulation parameters: trigger_overrides, tier_override, health_override
+- Audit hash: volume_config_hash for traceability
+- Calendar awareness: holiday and payday boosts in response
+- Prime hours by day of week in weekly_distribution
+- `python/tests/test_volume_utils.py` - 80 tests with 100% coverage
+- `python/tests/test_mcp_volume.py` - 25 integration tests for enhanced tool
+
+### Fixed
+- **BUG 1**: Eliminated duplicate tier thresholds (was in 3 places, now 1)
+- **BUG 2**: week_start parameter now used for calendar calculations
+- **BUG 3**: get_volume_config is now differentiated from bundled response
+
+### Changed
+- `get_creator_profile` volume_assignment uses volume_utils
+- `preflight.py` imports tier constants from volume_utils
+- Prime hours moved to volume_utils.PRIME_HOURS (string keys)
+- Health calculation volume_adjustment: -1 for DEATH_SPIRAL (was 0)
+
+### Technical
+- 5 atomic commits for safe rollback
+- 100% test coverage on volume_utils.py
+- Property-based tests for tier boundary verification
+
+---
+
+## [1.5.0] - 2026-01-08
+
+### Added
+- Persona data bundled into `get_creator_profile` via `include_persona=True` (default)
+- `get_persona_profile` standalone tool for management/debug access
+- Persona fields: primary_tone, secondary_tone, emoji_frequency, slang_level
+
+### Changed
+- `get_creator_profile` now returns persona data by default
+- Preflight MCP calls reduced from 4 to 3
+
+---
+
 ## [1.4.0] - 2026-01-08
 
 ### Fixed

@@ -7,8 +7,9 @@ import pytest
 import sys
 from pathlib import Path
 
-# Add mcp_server to path
+# Add mcp_server to path for both package import and internal module imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent / "mcp_server"))
 
 from mcp_server.main import (
     get_creator_profile,

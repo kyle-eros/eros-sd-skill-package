@@ -31,6 +31,13 @@ from pathlib import Path
 from contextlib import contextmanager
 from datetime import datetime
 
+from volume_utils import (
+    TIERS, TIER_ORDER, PRIME_HOURS, DAY_NAMES,
+    get_tier, get_tier_ranges, calc_calendar_boost, calc_weekend_boost,
+    calc_bump_multiplier, calc_health_status, compute_volume_config_hash,
+    get_week_dates, get_day_name
+)
+
 # Configure logging
 logging.basicConfig(
     level=os.environ.get("LOG_LEVEL", "INFO").upper(),
@@ -464,34 +471,20 @@ def get_creator_profile(
             # Calculate tier from revenue if not in volume_assignments
             mm_rev = response.get("analytics_summary", {}).get("mm_revenue_30d", 0) if include_analytics else (creator_data.get("current_message_net", 0) or 0)
 
-            if vol_rows:
-                vol = vol_rows[0]
-                tier = vol.get("volume_level", "STANDARD")
-                data_sources.append("volume_assignments")
-            else:
-                # Calculate from revenue
-                if mm_rev < 150: tier = "MINIMAL"
-                elif mm_rev < 800: tier = "LITE"
-                elif mm_rev < 3000: tier = "STANDARD"
-                elif mm_rev < 8000: tier = "HIGH_VALUE"
-                else: tier = "PREMIUM"
+            # Use shared tier calculation from volume_utils (eliminates BUG 1 - duplicate tier logic)
+            existing_tier = vol_rows[0].get("volume_level") if vol_rows else None
+            tier = get_tier(mm_rev, previous_tier=existing_tier)
+            ranges = get_tier_ranges(tier)
 
-            # Tier volume ranges
-            tier_config = {
-                "MINIMAL": {"rev": (1, 2), "eng": (1, 2), "ret": (1, 1)},
-                "LITE": {"rev": (2, 4), "eng": (2, 4), "ret": (1, 2)},
-                "STANDARD": {"rev": (4, 6), "eng": (4, 6), "ret": (2, 3)},
-                "HIGH_VALUE": {"rev": (6, 9), "eng": (5, 8), "ret": (2, 4)},
-                "PREMIUM": {"rev": (8, 12), "eng": (6, 10), "ret": (3, 5)}
-            }
-            ranges = tier_config.get(tier, tier_config["STANDARD"])
+            if vol_rows:
+                data_sources.append("volume_assignments")
 
             response["volume_assignment"] = {
                 "volume_level": tier,
                 "mm_revenue_used": mm_rev,
-                "revenue_per_day": list(ranges["rev"]),
-                "engagement_per_day": list(ranges["eng"]),
-                "retention_per_day": list(ranges["ret"]),
+                "revenue_per_day": list(ranges["revenue"]),
+                "engagement_per_day": list(ranges["engagement"]),
+                "retention_per_day": list(ranges["retention"]),
                 "ppv_per_day": vol_rows[0].get("ppv_per_day") if vol_rows else None,
                 "bump_per_day": vol_rows[0].get("bump_per_day") if vol_rows else None
             }
@@ -1335,81 +1328,408 @@ def get_persona_profile(creator_id: str) -> dict:
 # ============================================================
 
 @mcp.tool()
-def get_volume_config(creator_id: str, week_start: str) -> dict:
-    """Returns volume configuration including tier and daily distribution.
+def get_volume_config(
+    creator_id: str,
+    week_start: str,
+    include_trigger_breakdown: bool = False,
+    trigger_overrides: list[dict] | None = None,
+    tier_override: str | None = None,
+    health_override: dict | None = None,
+) -> dict:
+    """
+    Returns comprehensive week-specific volume configuration with all adjustments applied.
+
+    This is the POWER TOOL for volume calculations. Unlike the bundled response in
+    get_creator_profile, this tool returns pre-calculated weekly distribution with
+    calendar boosts, trigger multipliers, and health adjustments all applied.
 
     MCP Name: mcp__eros-db__get_volume_config
 
+    Use Cases:
+    - Schedule generation: Get final daily targets for a specific week
+    - Debugging: Understand WHY a schedule has certain volume density
+    - Simulation: Test "what-if" scenarios without touching DB
+    - Historical: Reconstruct past week configurations (calendar exact, tier current)
+
     Args:
-        creator_id: Creator identifier
-        week_start: Week start date (YYYY-MM-DD)
+        creator_id: Creator identifier (creator_id or page_name)
+        week_start: Week start date in YYYY-MM-DD format (REQUIRED - enables calendar awareness)
+        include_trigger_breakdown: If True, includes trigger_details array for auditing
+        trigger_overrides: Optional list of triggers to use INSTEAD of DB lookup
+            Format: [{"trigger_type": "HIGH_PERFORMER", "adjustment_multiplier": 1.2}]
+        tier_override: Optional tier to use INSTEAD of calculated tier (for simulation)
+        health_override: Optional health status override for simulation
+            Format: {"status": "WARNING", "volume_adjustment": 0}
 
     Returns:
-        Volume tier, daily volumes, and DOW distribution
+        Comprehensive volume configuration dict (see response structure below)
+
+    Example:
+        # Standard usage for schedule generation
+        get_volume_config("alexia", "2026-01-06")
+
+        # Simulation: What if alexia had HIGH_PERFORMER trigger?
+        get_volume_config("alexia", "2026-01-06",
+            trigger_overrides=[{"trigger_type": "HIGH_PERFORMER", "adjustment_multiplier": 1.2}])
+
+        # Debug: Full breakdown of why volumes are what they are
+        get_volume_config("alexia", "2026-01-06", include_trigger_breakdown=True)
     """
+    from datetime import datetime, date as date_type, timedelta
+
     logger.info(f"get_volume_config: creator_id={creator_id}, week_start={week_start}")
+    fetched_at = datetime.utcnow().isoformat() + "Z"
+
+    # =========================================================================
+    # INPUT VALIDATION
+    # =========================================================================
+    is_valid, validation_result = validate_creator_id(creator_id)
+    if not is_valid:
+        return {"error": f"Invalid creator_id format: {validation_result}"}
+
     try:
-        # Query creators with volume_assignments (actual table name, not volume_configs)
-        results = db_query("""
-            SELECT c.current_message_net as mm_revenue_monthly,
-                   va.volume_level as volume_tier,
-                   va.ppv_per_day, va.bump_per_day,
-                   c.content_category, c.current_fan_count, c.page_type
-            FROM creators c
-            LEFT JOIN volume_assignments va ON c.creator_id = va.creator_id AND va.is_active = 1
-            WHERE c.creator_id = ? OR c.page_name = ?
-            LIMIT 1
-        """, (creator_id, creator_id))
+        week_start_date = date_type.fromisoformat(week_start)
+    except ValueError:
+        return {"error": f"Invalid week_start format: {week_start}. Expected YYYY-MM-DD"}
 
-        if not results:
-            return {"error": f"Creator not found: {creator_id}"}
+    # Resolve creator
+    resolved = resolve_creator_id(creator_id)
+    if not resolved.get("found"):
+        return {"error": resolved.get("error", f"Creator not found: {creator_id}")}
 
-        row = dict(results[0])
-        revenue = row.get('mm_revenue_monthly') or 0
+    creator_id_resolved = resolved["creator_id"]
 
-        # Use volume_assignments if available, else calculate from revenue
-        tier = row.get('volume_tier')
-        if not tier:
-            # Calculate tier from revenue (DOMAIN_KNOWLEDGE.md Section 2)
-            if revenue < 150:
-                tier = "MINIMAL"
-            elif revenue < 800:
-                tier = "LITE"
-            elif revenue < 3000:
-                tier = "STANDARD"
-            elif revenue < 8000:
-                tier = "HIGH_VALUE"
-            else:
-                tier = "PREMIUM"
+    # Determine temporal context
+    today = date_type.today()
+    week_end = week_start_date + timedelta(days=6)
+    if week_end < today:
+        week_type = "past"
+    elif week_start_date > today:
+        week_type = "future"
+    else:
+        week_type = "current"
 
-        # Volume ranges by tier
-        tier_ranges = {
-            "MINIMAL": {"rev": (1, 2), "eng": (1, 2), "ret": (1, 1)},
-            "LITE": {"rev": (2, 4), "eng": (2, 4), "ret": (1, 2)},
-            "STANDARD": {"rev": (4, 6), "eng": (4, 6), "ret": (2, 3)},
-            "HIGH_VALUE": {"rev": (6, 9), "eng": (5, 8), "ret": (2, 4)},
-            "PREMIUM": {"rev": (8, 12), "eng": (6, 10), "ret": (3, 5)}
-        }
-        ranges = tier_ranges.get(tier, tier_ranges["STANDARD"])
+    # =========================================================================
+    # TIER DETERMINATION (4-level fallback chain)
+    # =========================================================================
+    tier = None
+    tier_source = None
+    tier_confidence = None
+    mm_revenue = None
+    fan_count = None
+    page_type = None
+    content_category = None
+    previous_tier = None
 
-        return {
-            "creator_id": creator_id,
-            "week_start": week_start,
-            "tier": tier,
-            "mm_revenue_monthly": revenue,
-            "page_type": row.get('page_type', 'paid'),
-            "content_category": row.get('content_category'),
-            "current_fan_count": row.get('current_fan_count', 0),
-            "ppv_per_day": row.get('ppv_per_day'),
-            "bump_per_day": row.get('bump_per_day'),
-            "revenue_per_day": list(ranges["rev"]),
-            "engagement_per_day": list(ranges["eng"]),
-            "retention_per_day": list(ranges["ret"])
-        }
+    # Override takes precedence
+    if tier_override and tier_override in TIER_ORDER:
+        tier = tier_override
+        tier_source = "override"
+        tier_confidence = "high"
+
+    try:
+        with get_db_connection() as conn:
+            # Get creator data
+            creator_row = conn.execute("""
+                SELECT
+                    page_type, content_category, current_fan_count,
+                    current_message_net, current_posts_net
+                FROM creators
+                WHERE creator_id = ?
+            """, (creator_id_resolved,)).fetchone()
+
+            if creator_row:
+                page_type = creator_row["page_type"]
+                content_category = creator_row["content_category"] or "softcore"
+                fan_count = creator_row["current_fan_count"]
+                msg_net = creator_row["current_message_net"] or 0
+                posts_net = creator_row["current_posts_net"] or 0
+                mm_revenue = msg_net + posts_net
+
+            if tier is None:
+                # Level 1: Check volume_assignments
+                vol_row = conn.execute("""
+                    SELECT volume_level, ppv_per_day, bump_per_day
+                    FROM volume_assignments
+                    WHERE creator_id = ? AND is_active = 1
+                    ORDER BY assigned_at DESC LIMIT 1
+                """, (creator_id_resolved,)).fetchone()
+
+                if vol_row and vol_row["volume_level"]:
+                    previous_tier = vol_row["volume_level"]
+                    tier = vol_row["volume_level"]
+                    tier_source = "volume_assignments"
+                    tier_confidence = "high"
+
+                # Level 2: Calculate from MM revenue
+                elif mm_revenue and mm_revenue > 0:
+                    tier = get_tier(mm_revenue, previous_tier)
+                    tier_source = "mm_revenue"
+                    tier_confidence = "high"
+
+                # Level 3: Estimate from fan count
+                elif fan_count and fan_count > 0:
+                    estimated_revenue = fan_count * 2.50
+                    tier = get_tier(estimated_revenue, previous_tier)
+                    mm_revenue = estimated_revenue
+                    tier_source = "fan_count_estimate"
+                    tier_confidence = "medium"
+
+                # Level 4: Default
+                else:
+                    tier = "MINIMAL"
+                    tier_source = "default"
+                    tier_confidence = "low"
+                    fan_count = fan_count or 1000
+                    mm_revenue = fan_count * 2.50
 
     except Exception as e:
-        logger.error(f"get_volume_config error: {e}")
-        return {"error": str(e)}
+        logger.error(f"get_volume_config DB error: {e}")
+        return {"error": f"Database error: {str(e)}"}
+
+    # Get tier ranges
+    base_ranges = get_tier_ranges(tier)
+
+    # =========================================================================
+    # TRIGGER INTEGRATION
+    # =========================================================================
+    triggers_data = []
+    trigger_multiplier = 1.0
+    triggers_applied = 0
+    triggers_source = "current_state"
+
+    if trigger_overrides is not None:
+        # Simulation mode: use provided triggers
+        triggers_data = trigger_overrides
+        for tr in triggers_data:
+            trigger_multiplier *= tr.get("adjustment_multiplier", 1.0)
+            triggers_applied += 1
+        triggers_source = "simulated"
+    else:
+        # Fetch from database
+        try:
+            with get_db_connection() as conn:
+                rows = conn.execute("""
+                    SELECT trigger_type, adjustment_multiplier, content_type,
+                           confidence, reason, expires_at
+                    FROM volume_triggers
+                    WHERE creator_id = ?
+                      AND is_active = 1
+                      AND (expires_at IS NULL OR expires_at > datetime('now'))
+                    ORDER BY adjustment_multiplier DESC
+                """, (creator_id_resolved,)).fetchall()
+
+                for row in rows:
+                    tr = dict(row)
+                    triggers_data.append(tr)
+                    trigger_multiplier *= tr.get("adjustment_multiplier", 1.0)
+                    triggers_applied += 1
+        except Exception as e:
+            logger.warning(f"Could not fetch triggers: {e}")
+
+    trigger_details = triggers_data if include_trigger_breakdown else None
+
+    # =========================================================================
+    # HEALTH STATUS
+    # =========================================================================
+    health_source = "current_state"
+
+    if health_override:
+        health = {
+            "status": health_override.get("status", "HEALTHY"),
+            "saturation_score": health_override.get("saturation_score", 50),
+            "opportunity_score": health_override.get("opportunity_score", 50),
+            "decline_weeks": health_override.get("decline_weeks", 0),
+            "volume_adjustment": health_override.get("volume_adjustment", 0),
+        }
+        health_source = "simulated"
+    else:
+        # Calculate from mass_messages performance data (matching get_performance_trends pattern)
+        sat, opp, decline = 50, 50, 0
+
+        try:
+            with get_db_connection() as conn:
+                # Get saturation from recent send density
+                density_row = conn.execute("""
+                    SELECT
+                        COUNT(*) as send_count,
+                        AVG(CASE WHEN view_rate IS NOT NULL THEN view_rate ELSE 0 END) as avg_view_rate
+                    FROM mass_messages
+                    WHERE creator_id = ?
+                      AND sent_date >= date('now', '-14 days')
+                """, (creator_id_resolved,)).fetchone()
+
+                if density_row and density_row["send_count"]:
+                    sends_14d = density_row["send_count"]
+                    # Saturation estimate: high sends = high saturation
+                    sat = min(100, int((sends_14d / 28) * 100))  # 2 sends/day = 100%
+                    opp = 100 - sat
+
+                # Get decline weeks from weekly earnings trend
+                weekly_rows = conn.execute("""
+                    SELECT
+                        strftime('%Y-%W', sent_date) as week,
+                        SUM(earnings) as weekly_earnings
+                    FROM mass_messages
+                    WHERE creator_id = ?
+                      AND sent_date >= date('now', '-56 days')
+                    GROUP BY week
+                    ORDER BY week DESC
+                    LIMIT 8
+                """, (creator_id_resolved,)).fetchall()
+
+                if len(weekly_rows) >= 2:
+                    decline = 0
+                    for i in range(len(weekly_rows) - 1):
+                        curr = weekly_rows[i]["weekly_earnings"] or 0
+                        prev = weekly_rows[i + 1]["weekly_earnings"] or 0
+                        if curr < prev:
+                            decline += 1
+                        else:
+                            break  # Consecutive decline broken
+
+        except Exception as e:
+            logger.warning(f"Could not calculate health: {e}")
+
+        health_calc = calc_health_status(sat, decline)
+        health = {
+            "status": health_calc["status"],
+            "saturation_score": sat,
+            "opportunity_score": opp,
+            "decline_weeks": decline,
+            "volume_adjustment": health_calc["volume_adjustment"],
+        }
+
+    # =========================================================================
+    # BUMP MULTIPLIER
+    # =========================================================================
+    bump_multiplier = calc_bump_multiplier(content_category or "softcore", tier)
+
+    # =========================================================================
+    # WEEKLY DISTRIBUTION (THE KEY DIFFERENTIATOR)
+    # =========================================================================
+    week_dates = get_week_dates(week_start)
+    weekly_distribution = {}
+    calendar_boosts = []
+    boost_dates = []
+
+    for d in week_dates:
+        day_name = get_day_name(d)
+
+        # Calculate boosts
+        cal_boost = calc_calendar_boost(d)
+        wknd_boost = calc_weekend_boost(d)
+        day_multiplier = cal_boost * wknd_boost * trigger_multiplier
+
+        # Track calendar boosts
+        if cal_boost > 1.0:
+            reason = "holiday" if cal_boost >= 1.30 else "payday"
+            calendar_boosts.append({
+                "date": d.isoformat(),
+                "boost": cal_boost,
+                "reason": reason
+            })
+            boost_dates.append(d.isoformat())
+
+        # Calculate adjusted volumes for the day
+        # Base from tier midpoint + health adjustment, then apply day multiplier
+        rev_base = (base_ranges["revenue"][0] + base_ranges["revenue"][1]) / 2
+        eng_base = (base_ranges["engagement"][0] + base_ranges["engagement"][1]) / 2
+        ret_base = (base_ranges["retention"][0] + base_ranges["retention"][1]) / 2
+
+        rev_adjusted = int(round(rev_base * day_multiplier + health["volume_adjustment"]))
+        eng_adjusted = int(round(eng_base * day_multiplier + health["volume_adjustment"]))
+        ret_adjusted = int(round(ret_base * day_multiplier))  # Retention not boosted by health
+
+        # Clamp to reasonable ranges (min 1, max 2x tier max)
+        rev_adjusted = max(1, min(rev_adjusted, base_ranges["revenue"][1] * 2))
+        eng_adjusted = max(1, min(eng_adjusted, base_ranges["engagement"][1] * 2))
+        ret_adjusted = max(1, min(ret_adjusted, base_ranges["retention"][1] * 2))
+
+        # Get prime hours for this day (using string key)
+        prime = PRIME_HOURS.get(day_name, PRIME_HOURS["monday"])
+
+        weekly_distribution[day_name] = {
+            "date": d.isoformat(),
+            "revenue": rev_adjusted,
+            "engagement": eng_adjusted,
+            "retention": ret_adjusted,
+            "prime_hours": {
+                "revenue": prime[:2] if len(prime) >= 2 else prime,
+                "engagement": prime[1:] if len(prime) >= 2 else prime,
+                "retention": [(8, 10), (18, 20)]  # Off-peak for retention
+            },
+            "calendar_boost": cal_boost,
+            "weekend_boost": wknd_boost,
+            "day_multiplier": round(day_multiplier, 3)
+        }
+
+    # =========================================================================
+    # COMPUTE CONFIG HASH
+    # =========================================================================
+    config_hash = compute_volume_config_hash(
+        tier=tier,
+        trigger_multiplier=round(trigger_multiplier, 4),
+        health_adjustment=health["volume_adjustment"],
+        week_start=week_start,
+        boost_dates=boost_dates
+    )
+
+    hash_inputs = [
+        f"tier:{tier}",
+        f"trigger_mult:{round(trigger_multiplier, 4)}",
+        f"health_adj:{health['volume_adjustment']}",
+        f"week:{week_start}",
+        f"boosts:{','.join(sorted(boost_dates)) if boost_dates else 'none'}"
+    ]
+
+    # =========================================================================
+    # BUILD RESPONSE
+    # =========================================================================
+    return {
+        "creator_id": creator_id_resolved,
+        "week_start": week_start,
+        "tier": tier,
+        "tier_source": tier_source,
+        "tier_confidence": tier_confidence,
+
+        "base_ranges": {
+            "revenue": list(base_ranges["revenue"]),
+            "engagement": list(base_ranges["engagement"]),
+            "retention": list(base_ranges["retention"]),
+        },
+
+        "trigger_multiplier": round(trigger_multiplier, 4),
+        "triggers_applied": triggers_applied,
+        "trigger_details": trigger_details,
+
+        "health": health,
+
+        "bump_multiplier": round(bump_multiplier, 2),
+        "content_category": content_category,
+
+        "weekly_distribution": weekly_distribution,
+        "calendar_boosts": calendar_boosts,
+
+        "temporal_context": {
+            "week_type": week_type,
+            "data_accuracy": {
+                "calendar_boosts": "exact",
+                "tier": "exact" if tier_source == "override" else "current_state",
+                "triggers": triggers_source,
+                "health": health_source
+            }
+        },
+
+        "metadata": {
+            "fetched_at": fetched_at,
+            "volume_config_hash": config_hash,
+            "hash_inputs": hash_inputs,
+            "mm_revenue_monthly": round(mm_revenue, 2) if mm_revenue else None,
+            "current_fan_count": fan_count,
+            "page_type": page_type
+        }
+    }
 
 
 @mcp.tool()

@@ -6,23 +6,21 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Protocol
 
-# --- Constants (from DOMAIN_KNOWLEDGE.md) ---
-TIERS = {
-    "MINIMAL": (0, 149, (1,2), (1,2), (1,1)),
-    "LITE": (150, 799, (2,4), (2,4), (1,2)),
-    "STANDARD": (800, 2999, (4,6), (4,6), (2,3)),
-    "HIGH_VALUE": (3000, 7999, (6,9), (5,8), (2,4)),
-    "PREMIUM": (8000, float("inf"), (8,12), (6,10), (3,5)),
-}  # (min, max, rev, eng, ret)
-TIER_ORDER = list(TIERS.keys())
-PRIME_HOURS = {
-    "monday": [(12,14),(19,22),(10,11)], "tuesday": [(12,14),(20,23),(10,11)],
-    "wednesday": [(12,14),(20,23),(18,19)], "thursday": [(12,14),(20,23),(18,19)],
-    "friday": [(12,14),(21,24),(17,19)], "saturday": [(11,14),(22,25),(16,18)],
-    "sunday": [(11,14),(20,23),(16,18)],
-}
-HOLIDAYS = {(1,1),(2,14),(7,4),(10,31),(12,25)}
-BUMP_MULT = {"lifestyle": 1.0, "softcore": 1.5, "amateur": 2.0, "explicit": 2.67}
+# --- Constants from canonical source (volume_utils) ---
+# All tier thresholds, prime hours, and boost constants now imported from
+# single source of truth to prevent drift (BUG 1 elimination).
+from mcp_server.volume_utils import (
+    TIERS,
+    TIER_ORDER,
+    PRIME_HOURS,
+    HOLIDAYS,
+    BUMP_MULT,
+    DAY_NAMES,
+    # Utility functions also available but not replacing local methods yet
+    # to preserve existing behavior during refactoring:
+    # get_tier, get_tier_ranges, calc_calendar_boost, calc_bump_multiplier,
+    # calc_health_status
+)
 
 @dataclass(frozen=True, slots=True)
 class CreatorContext:
