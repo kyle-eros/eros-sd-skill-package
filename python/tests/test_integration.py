@@ -210,10 +210,10 @@ class TestMetricsTracking:
         result = await EROSOrchestrator(mcp, task).run("metrics", "2026-01-06")
 
         # Check preflight metrics
-        # v1.1.0: Reduced from 7 to 4 MCP calls via bundled get_creator_profile
+        # v1.5.0: Reduced from 4 to 3 MCP calls via persona bundling
         assert "preflight" in result.metrics
         assert "duration_ms" in result.metrics["preflight"]
-        assert result.metrics["preflight"]["mcp_calls"] == 4
+        assert result.metrics["preflight"]["mcp_calls"] == 3
 
         # Check generator metrics
         assert "generator" in result.metrics

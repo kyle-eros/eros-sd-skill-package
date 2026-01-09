@@ -209,8 +209,8 @@ class TestPreflightExecution:
         assert ctx.page_type == "paid"
         assert len(ctx.vault_types) > 0
         assert ctx.volume_config["tier"] in TIER_ORDER
-        # v1.1.0: Reduced from 7 to 4 MCP calls via bundled get_creator_profile
-        assert ctx.mcp_calls_made == 4
+        # v1.5.0: Reduced from 4 to 3 MCP calls via persona bundling
+        assert ctx.mcp_calls_made == 3
 
     async def test_execute_inactive_creator_fails(self):
         """Inactive creator raises ValueError."""
@@ -219,3 +219,24 @@ class TestPreflightExecution:
         engine = PreflightEngine(mcp)
         with pytest.raises(ValueError, match="not active"):
             await engine.execute("inactive", "2026-01-06")
+
+    async def test_preflight_context_includes_persona(self):
+        """Verify CreatorContext has persona from bundled response."""
+        mcp = MockMCPClient(TestDataFactory.STANDARD)
+        engine = PreflightEngine(mcp)
+        ctx = await engine.execute("test_creator", "2026-01-06")
+
+        assert ctx.persona is not None
+        assert "primary_tone" in ctx.persona
+        assert "emoji_frequency" in ctx.persona
+        assert ctx.persona.get("primary_tone") in ("playful", "aggressive", "seductive", "sultry")
+
+    async def test_preflight_persona_uses_bundled_response(self):
+        """Verify persona comes from bundled get_creator_profile, not standalone call."""
+        mcp = MockMCPClient(TestDataFactory.STANDARD)
+        engine = PreflightEngine(mcp)
+        ctx = await engine.execute("test_creator", "2026-01-06")
+
+        # Verify get_persona_profile was NOT called (persona comes from bundle)
+        assert "get_persona_profile" not in mcp.call_log
+        assert "get_creator_profile" in mcp.call_log

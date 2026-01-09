@@ -301,9 +301,10 @@ def get_creator_profile(
     include_analytics: bool = True,
     include_volume: bool = True,
     include_content_rankings: bool = True,
-    include_vault: bool = True
+    include_vault: bool = True,
+    include_persona: bool = True
 ) -> dict:
-    """Retrieves comprehensive creator profile with analytics, volume, content rankings, and vault.
+    """Retrieves comprehensive creator profile with analytics, volume, content rankings, vault, and persona.
 
     MCP Name: mcp__eros-db__get_creator_profile
 
@@ -316,6 +317,7 @@ def get_creator_profile(
         include_volume: Include volume tier and daily distribution (default: True)
         include_content_rankings: Include TOP/MID/LOW/AVOID content types (default: True)
         include_vault: Include vault availability from vault_matrix (default: True)
+        include_persona: Include tone, emoji, slang settings for voice matching (default: True)
 
     Returns:
         Comprehensive profile bundle:
@@ -344,12 +346,16 @@ def get_creator_profile(
                 "allowed_types", "allowed_type_names",
                 "type_count", "vault_hash"
             },
+            "persona": {  # if include_persona=True
+                "primary_tone", "secondary_tone", "emoji_frequency",
+                "slang_level", "avg_sentiment", "avg_caption_length"
+            },
             "metadata": {
                 "fetched_at", "data_sources_used", "mcp_calls_saved"
             }
         }
     """
-    logger.info(f"get_creator_profile: creator_id={creator_id}, analytics={include_analytics}, volume={include_volume}, rankings={include_content_rankings}, vault={include_vault}")
+    logger.info(f"get_creator_profile: creator_id={creator_id}, analytics={include_analytics}, volume={include_volume}, rankings={include_content_rankings}, vault={include_vault}, persona={include_persona}")
 
     fetched_at = datetime.now().isoformat()
     data_sources = []
@@ -593,12 +599,43 @@ def get_creator_profile(
                 "vault_hash": vault_hash
             }
 
+        # Step 5c: Get persona profile (if requested)
+        if include_persona:
+            persona_query = """
+                SELECT
+                    persona_id, creator_id, primary_tone, secondary_tone,
+                    emoji_frequency, favorite_emojis, slang_level,
+                    avg_sentiment, avg_caption_length, last_analyzed,
+                    validation_status
+                FROM creator_personas
+                WHERE creator_id = ?
+            """
+            persona_results = db_query(persona_query, (creator_pk,))
+
+            if persona_results:
+                persona_data = dict(persona_results[0])
+                persona_data["_default"] = False
+                data_sources.append("creator_personas")
+            else:
+                # Default fallback for missing persona
+                persona_data = {
+                    "creator_id": creator_pk,
+                    "primary_tone": "playful",
+                    "secondary_tone": None,
+                    "emoji_frequency": "moderate",
+                    "slang_level": "light",
+                    "_default": True
+                }
+
+            response["persona"] = persona_data
+
         # Step 6: Add metadata
         mcp_calls_saved = 0
         if include_analytics: mcp_calls_saved += 1
         if include_volume: mcp_calls_saved += 1
         if include_content_rankings: mcp_calls_saved += 1
         if include_vault: mcp_calls_saved += 1
+        if include_persona: mcp_calls_saved += 1
 
         response["metadata"] = {
             "fetched_at": fetched_at,
@@ -608,7 +645,8 @@ def get_creator_profile(
                 "analytics": include_analytics,
                 "volume": include_volume,
                 "content_rankings": include_content_rankings,
-                "vault": include_vault
+                "vault": include_vault,
+                "persona": include_persona
             }
         }
 
@@ -1278,10 +1316,10 @@ def get_persona_profile(creator_id: str) -> dict:
             # Return sensible defaults if no persona configured
             return {
                 "creator_id": creator_id,
-                "primary_tone": "GFE",
-                "secondary_tone": "playful",
+                "primary_tone": "playful",       # FIXED: Valid tone from (aggressive, playful, seductive, sultry)
+                "secondary_tone": None,          # FIXED: No assumption about secondary when using defaults
                 "emoji_frequency": "moderate",
-                "slang_level": "low",
+                "slang_level": "light",          # FIXED: Valid value from CHECK (none, light, heavy)
                 "_default": True
             }
 

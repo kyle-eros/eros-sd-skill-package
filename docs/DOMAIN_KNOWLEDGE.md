@@ -432,8 +432,8 @@ Certificate must be < 5 minutes old at save_schedule time.
 | Tool | Category | Purpose |
 |------|----------|---------|
 | `get_active_creators` | Creator | Paginated list with filters (tier, page_type, revenue) |
-| `get_creator_profile` | Creator | **Bundled**: Profile + analytics + volume + rankings (v1.1.0) |
-| `get_persona_profile` | Creator | Tone, archetype, voice |
+| `get_creator_profile` | Creator | **Bundled**: Profile + analytics + volume + rankings + vault + **persona** (v1.5.0) |
+| `get_persona_profile` | Creator | Standalone persona access (management/debug only) |
 | `get_allowed_content_types` | Creator | Allowed content types (HARD GATE) |
 | `get_send_type_captions` | Caption | Send-type compatible captions |
 | `get_batch_captions_by_content_types` | Caption | Batch PPV caption retrieval |

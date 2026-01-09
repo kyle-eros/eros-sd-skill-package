@@ -52,11 +52,11 @@ Before using tools:
 
 | Tool | Category | Description | GATE |
 |------|----------|-------------|------|
-| `mcp__eros-db__get_creator_profile` | Creator | **Bundled**: Profile + analytics + volume + rankings | |
+| `mcp__eros-db__get_creator_profile` | Creator | **Bundled**: Profile + analytics + volume + rankings + vault + **persona** | |
 | `mcp__eros-db__get_active_creators` | Creator | Paginated list with tier/revenue filters | |
 | `mcp__eros-db__get_allowed_content_types` | Creator | Allowed content types | HARD |
 | `mcp__eros-db__get_content_type_rankings` | Creator | Performance tiers (also in bundled) | HARD |
-| `mcp__eros-db__get_persona_profile` | Creator | Tone/archetype settings | |
+| `mcp__eros-db__get_persona_profile` | Creator | Standalone persona access (management/debug only) | |
 | `mcp__eros-db__get_volume_config` | Schedule | Tier and daily volumes (also in bundled) | |
 | `mcp__eros-db__get_active_volume_triggers` | Schedule | Performance triggers | |
 | `mcp__eros-db__get_performance_trends` | Schedule | Health/saturation metrics | |
@@ -69,11 +69,12 @@ Before using tools:
 
 ### Tool Usage by Phase
 
-**Phase 1 - Preflight** (4 MCP calls via bundled response):
-- `mcp__eros-db__get_creator_profile` - **Bundled**: Profile + analytics + volume + rankings (replaces 3 separate calls)
-- `mcp__eros-db__get_allowed_content_types` - Allowed content types (HARD GATE)
-- `mcp__eros-db__get_persona_profile` - Caption styling
+**Phase 1 - Preflight** (3 MCP calls via bundled response):
+- `mcp__eros-db__get_creator_profile` - **Bundled**: Profile + analytics + volume + rankings + vault + **persona**
 - `mcp__eros-db__get_active_volume_triggers` - Performance triggers
+- `mcp__eros-db__get_performance_trends` - Health/saturation metrics
+
+> **Note**: `get_persona_profile` is no longer called during preflight. Persona data is now bundled into `get_creator_profile(include_persona=True)`.
 
 **Phase 2 - Generate** (3 tools):
 - `mcp__eros-db__get_batch_captions_by_content_types` - PPV captions
@@ -130,7 +131,7 @@ python python/preflight.py --creator grace_bennett --week 2026-01-06
 | `avoid_types` | string[] | `mcp__eros-db__get_content_type_rankings` |
 | `top_content_types` | {type, tier}[] | `mcp__eros-db__get_content_type_rankings` |
 | `volume_config` | VolumeConfig | `mcp__eros-db__get_volume_config` |
-| `persona` | Persona | `mcp__eros-db__get_persona_profile` |
+| `persona` | Persona | `mcp__eros-db__get_creator_profile` (bundled) |
 | `active_triggers` | Trigger[] | `mcp__eros-db__get_active_volume_triggers` |
 | `pricing_config` | PricingConfig | `mcp__eros-db__get_creator_profile` |
 
@@ -202,16 +203,15 @@ python python/preflight.py --creator grace_bennett --week 2026-01-06
 
 ## MCP Tools by Phase
 
-### Phase 1: Preflight (4 MCP calls)
+### Phase 1: Preflight (3 MCP calls)
 
 | Tool | Purpose |
 |------|---------|
-| `mcp__eros-db__get_creator_profile` | **Bundled**: Profile + analytics + volume + rankings (43% reduction from 7 to 4 calls) |
-| `mcp__eros-db__get_allowed_content_types` | Allowed content types (HARD GATE) |
-| `mcp__eros-db__get_persona_profile` | Tone, archetype, voice |
+| `mcp__eros-db__get_creator_profile` | **Bundled**: Profile + analytics + volume + rankings + vault + **persona** (57% reduction from 7 to 3 calls) |
 | `mcp__eros-db__get_active_volume_triggers` | Performance-based adjustments |
+| `mcp__eros-db__get_performance_trends` | Health/saturation metrics |
 
-> **Note**: `get_creator_profile` now includes `analytics_summary`, `volume_assignment`, `top_content_types`, `avoid_types`, and `top_types` by default. Set `include_analytics=False`, `include_volume=False`, or `include_content_rankings=False` to disable bundling.
+> **Note**: `get_creator_profile` now includes `analytics_summary`, `volume_assignment`, `top_content_types`, `avoid_types`, `top_types`, `allowed_content_types`, and **`persona`** by default. Set `include_analytics=False`, `include_volume=False`, `include_content_rankings=False`, `include_vault=False`, or `include_persona=False` to disable bundling.
 
 ### Phase 2: Generator (3 tools)
 

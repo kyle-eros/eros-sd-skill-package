@@ -38,7 +38,7 @@ Build optimized weekly schedule items from CreatorContext. Select captions, assi
 
 ## Input: CreatorContext
 
-Received from Phase 1 (preflight.py):
+Received from Phase 1 (preflight.py) - uses bundled `get_creator_profile` response:
 
 ```json
 {
@@ -56,11 +56,27 @@ Received from Phase 1 (preflight.py):
     "bump_multiplier": 1.5,
     "calendar_boosts": [...]
   },
-  "persona": {...},
+  "persona": {
+    "primary_tone": "playful",
+    "secondary_tone": "bratty",
+    "emoji_frequency": "moderate",
+    "slang_level": "light",
+    "_default": false
+  },
   "active_triggers": [...],
   "pricing_config": {...}
 }
 ```
+
+## Voice Matching (NEW)
+
+The CONTEXT includes persona voice settings. When selecting captions:
+- Match the creator's `primary_tone` when choosing between similar captions
+- Respect `emoji_frequency`:
+  - **heavy**: Emoji-rich captions are on-brand
+  - **none**: Avoid emoji-heavy options
+  - **light/moderate**: Standard selection
+- The STYLE section in the prompt provides explicit guidance
 
 ---
 

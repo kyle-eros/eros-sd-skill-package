@@ -86,14 +86,16 @@ class ProductionMCPClient:
         include_analytics: bool = True,
         include_volume: bool = True,
         include_content_rankings: bool = True,
-        include_vault: bool = True
+        include_vault: bool = True,
+        include_persona: bool = True
     ) -> dict:
         """MCP: mcp__eros-db__get_creator_profile (bundled)
 
-        Returns comprehensive bundle with analytics, volume, content rankings, and allowed content types.
-        Reduces preflight from 8 MCP calls to 4.
+        Returns comprehensive bundle with analytics, volume, content rankings, vault, and persona.
+        Reduces preflight from 4 MCP calls to 3.
 
         NEW in v1.3.0: include_vault=True bundles allowed_content_types data for HARD GATE validation.
+        NEW in v1.4.0: include_persona=True bundles persona data for voice matching.
         """
         return await self._call(
             "get_creator_profile",
@@ -101,7 +103,8 @@ class ProductionMCPClient:
             include_analytics=include_analytics,
             include_volume=include_volume,
             include_content_rankings=include_content_rankings,
-            include_vault=include_vault
+            include_vault=include_vault,
+            include_persona=include_persona
         )
 
     @with_retry()

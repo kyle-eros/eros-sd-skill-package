@@ -1,6 +1,6 @@
 # EROS MCP Setup Guide
 
-**Version**: 1.2.0
+**Version**: 1.5.0
 **Last Updated**: 2026-01-08
 **Server**: eros-db
 
@@ -86,8 +86,18 @@ The EROS Schedule Generator uses an MCP server (`eros-db`) to access the SQLite 
 - `include_analytics=True` - 30-day metrics with 3-level MM revenue fallback
 - `include_volume=True` - Volume tier assignment with daily ranges
 - `include_content_rankings=True` - TOP/MID/LOW/AVOID content types
+- `include_vault=True` - Allowed content types from vault_matrix
+- `include_persona=True` - Tone, emoji frequency, slang level for voice matching (NEW in v1.5.0)
 
-**This reduces preflight from 7 MCP calls to 4.**
+**This reduces preflight from 7 MCP calls to 3.**
+
+| Parameter | Default | Data Included |
+|-----------|---------|---------------|
+| `include_analytics` | `True` | 30-day MM revenue, conversion metrics |
+| `include_volume` | `True` | Volume tier and daily distribution |
+| `include_content_rankings` | `True` | TOP/MID/LOW/AVOID performance tiers |
+| `include_vault` | `True` | Allowed content types from vault_matrix |
+| `include_persona` | `True` | Tone, emoji frequency, slang level |
 
 **Return Structure**:
 ```json
@@ -104,6 +114,18 @@ The EROS Schedule Generator uses an MCP server (`eros-db`) to access the SQLite 
   "top_content_types": [ { "type_name", "performance_tier", "rps", ... } ],
   "avoid_types": [ ... ],
   "top_types": [ ... ],
+  "allowed_content_types": {
+    "allowed_types": [...],
+    "allowed_type_names": [...],
+    "type_count": int
+  },
+  "persona": {
+    "primary_tone": "playful",
+    "secondary_tone": "bratty",
+    "emoji_frequency": "moderate",
+    "slang_level": "light",
+    "_default": false
+  },
   "metadata": { "fetched_at", "data_sources_used", "mcp_calls_saved" }
 }
 ```
@@ -147,14 +169,13 @@ The EROS Schedule Generator uses an MCP server (`eros-db`) to access the SQLite 
 
 ## Tool Usage by Phase
 
-### Phase 1 - Preflight (4 tools - optimized)
+### Phase 1 - Preflight (3 tools - optimized)
 ```
-get_creator_profile     → Creator + Analytics + Volume + Rankings (BUNDLED)
-get_persona_profile     → Caption styling
+get_creator_profile        → Creator + Analytics + Volume + Rankings + Vault + Persona (BUNDLED)
 get_active_volume_triggers → Performance triggers
-get_performance_trends  → Health and saturation metrics
+get_performance_trends     → Health and saturation metrics
 ```
-**Note**: `get_creator_profile` replaces separate calls to `get_volume_config`, `get_allowed_content_types`, and `get_content_type_rankings`.
+**Note**: `get_creator_profile` now replaces separate calls to `get_volume_config`, `get_allowed_content_types`, `get_content_type_rankings`, AND `get_persona_profile`. Persona data is bundled via `include_persona=True` (default).
 
 ### Phase 2 - Generate (3 tools)
 ```
@@ -331,4 +352,4 @@ Key tables:
 ---
 
 *EROS Schedule Generator MCP Documentation*
-*Server: eros-db | Tools: 15 | MCP Spec: 2025-11-25 | get_creator_profile v2 (bundled)*
+*Server: eros-db | Tools: 15 | MCP Spec: 2025-11-25 | get_creator_profile v3 (bundled with persona)*

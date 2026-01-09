@@ -19,6 +19,11 @@ class CreatorConfig:
     saturation: int = 45
     decline_weeks: int = 0
     content_category: str = "softcore"
+    # NEW: Persona configuration for test scenarios
+    persona_tone: str = "playful"           # NEW
+    persona_secondary: str | None = "bratty" # NEW
+    emoji_frequency: str = "moderate"        # NEW
+    slang_level: str = "light"              # NEW
 
 
 class TestDataFactory:
@@ -59,7 +64,7 @@ class MockMCPClient:
 
     async def get_creator_profile(self, creator_id: str, include_analytics: bool = True,
                                    include_volume: bool = True, include_content_rankings: bool = True,
-                                   include_vault: bool = True) -> dict:
+                                   include_vault: bool = True, include_persona: bool = True) -> dict:
         """Mock bundled creator profile."""
         self._log("get_creator_profile")
         c = self.config
@@ -72,7 +77,7 @@ class MockMCPClient:
                 "content_category": c.content_category, "base_price": 15.00,
                 "has_active_experiments": False,
             },
-            "metadata": {"mcp_calls_saved": 4}
+            "metadata": {"mcp_calls_saved": 5}
         }
 
         if include_analytics:
@@ -135,6 +140,21 @@ class MockMCPClient:
                 "allowed_type_names": allowed_result["allowed_type_names"],
                 "type_count": allowed_result["type_count"],
                 "vault_hash": allowed_result["metadata"]["vault_hash"]
+            }
+
+        # Add persona section (NEW)
+        if include_persona:
+            response["persona"] = {
+                "persona_id": 1,
+                "creator_id": creator_id,
+                "primary_tone": c.persona_tone,
+                "secondary_tone": c.persona_secondary,
+                "emoji_frequency": c.emoji_frequency,
+                "slang_level": c.slang_level,
+                "avg_sentiment": 0.75,
+                "avg_caption_length": 85,
+                "favorite_emojis": None,
+                "_default": False
             }
 
         return response
@@ -232,8 +252,22 @@ class MockMCPClient:
         }
 
     async def get_persona_profile(self, creator_id: str) -> dict:
+        """Return persona matching DB schema structure."""
         self._log("get_persona_profile")
-        return {"primary_tone": "GFE", "secondary_tone": "playful", "archetype": "girl_next_door"}
+        return {
+            "persona_id": 1,
+            "creator_id": creator_id,
+            "primary_tone": self.config.persona_tone,
+            "secondary_tone": self.config.persona_secondary,
+            "emoji_frequency": self.config.emoji_frequency,
+            "slang_level": self.config.slang_level,
+            "avg_sentiment": 0.75,
+            "avg_caption_length": 85,
+            "favorite_emojis": None,
+            "last_analyzed": "2025-12-01T00:00:00",
+            "validation_status": "unvalidated",
+            "_default": False
+        }
 
     async def get_active_volume_triggers(self, creator_id: str) -> dict:
         self._log("get_active_volume_triggers")

@@ -46,7 +46,15 @@ class MCPClient(Protocol):
     """Protocol for MCP client - matches eros-db server tools (15 total)."""
 
     # Creator tools (5)
-    async def get_creator_profile(self, creator_id: str, include_analytics: bool = True, include_volume: bool = True, include_content_rankings: bool = True, include_vault: bool = True) -> dict: ...
+    async def get_creator_profile(
+        self,
+        creator_id: str,
+        include_analytics: bool = True,
+        include_volume: bool = True,
+        include_content_rankings: bool = True,
+        include_vault: bool = True,
+        include_persona: bool = True,  # v1.5.0: Persona now bundled
+    ) -> dict: ...
     async def get_active_creators(self, limit: int = 100, tier: str = None) -> dict: ...
     async def get_allowed_content_types(self, creator_id: str, include_category: bool = True) -> dict: ...
     async def get_content_type_rankings(self, creator_id: str) -> dict: ...
@@ -89,16 +97,18 @@ class PreflightEngine:
             creator_id=creator_id, page_type=profile.get("page_type", "paid"),
             vault_types=tuple(self._vault_types(raw)), avoid_types=tuple(self._avoid_types(raw)),
             top_content_types=tuple(self._all_content_rankings(raw)), volume_config=volume,
-            persona=raw.get("persona_profile", {}), active_triggers=tuple(triggers),
+            persona=raw.get("persona", {}),  # v1.5.0: Now from bundled response
+            active_triggers=tuple(triggers),
             pricing_config=self._pricing(raw), timing_slots=timing, health=health,
             generated_at=datetime.now().isoformat(),
-            preflight_duration_ms=(datetime.now()-start).total_seconds()*1000, mcp_calls_made=4)
+            preflight_duration_ms=(datetime.now()-start).total_seconds()*1000,
+            mcp_calls_made=3)  # v1.5.0: Reduced from 4 via persona bundling
 
     async def _fetch_all(self, cid: str, ws: str) -> dict:
         """Fetch all creator data with optimized bundled call.
 
-        Uses bundled get_creator_profile for efficiency (saves 4 MCP calls):
-        - analytics, volume, content_rankings, and vault all bundled.
+        Uses bundled get_creator_profile for efficiency (saves 5 MCP calls):
+        - analytics, volume, content_rankings, vault, and persona all bundled.
 
         CRITICAL FIX (v1.3.0): Vault data now comes directly from vault_matrix
         instead of being derived from top_content_types. This ensures we catch
@@ -106,20 +116,23 @@ class PreflightEngine:
 
         CRITICAL FIX (v1.4.0): Now uses pre-computed avoid_types and top_types
         from bundled response instead of re-computing them.
+
+        OPTIMIZATION (v1.5.0): Persona now bundled into get_creator_profile,
+        reducing total MCP calls from 4 to 3.
         """
 
-        # Use bundled get_creator_profile for efficiency (saves 4 MCP calls)
+        # Use bundled get_creator_profile for efficiency (saves 5 MCP calls)
         profile_bundle = await self.mcp.get_creator_profile(
             cid,
             include_analytics=True,
             include_volume=True,
             include_content_rankings=True,
-            include_vault=True
+            include_vault=True,
+            include_persona=True,  # v1.5.0: Persona now bundled
         )
 
-        # Parallel fetch remaining data not in bundle
+        # Parallel fetch remaining data not in bundle (only 2 calls now)
         remaining_results = await asyncio.gather(
-            self.mcp.get_persona_profile(cid),
             self.mcp.get_active_volume_triggers(cid),
             self.mcp.get_performance_trends(cid, "14d"),
             return_exceptions=True
@@ -145,9 +158,9 @@ class PreflightEngine:
             "allowed_content_types": vault_data,
             "content_type_rankings": rankings_data,  # Now includes pre-computed lists
             "analytics_summary": profile_bundle.get("analytics_summary", {}),
-            "persona_profile": remaining_results[0] if not isinstance(remaining_results[0], Exception) else {},
-            "active_triggers": remaining_results[1] if not isinstance(remaining_results[1], Exception) else [],
-            "performance_trends": remaining_results[2] if not isinstance(remaining_results[2], Exception) else {},
+            "persona": profile_bundle.get("persona", {}),  # v1.5.0: Now from bundle
+            "active_triggers": remaining_results[0] if not isinstance(remaining_results[0], Exception) else [],
+            "performance_trends": remaining_results[1] if not isinstance(remaining_results[1], Exception) else {},
             "_bundle_metadata": profile_bundle.get("metadata", {})
         }
 

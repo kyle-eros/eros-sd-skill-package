@@ -195,7 +195,7 @@ class TestGetCreatorProfileOptimized:
         if result.get("found"):
             metadata = result.get("metadata", {})
             assert "mcp_calls_saved" in metadata
-            assert metadata["mcp_calls_saved"] == 4  # analytics + volume + rankings + vault
+            assert metadata["mcp_calls_saved"] == 5  # analytics + volume + rankings + vault + persona
 
 
 class TestBackwardCompatibility:
@@ -483,6 +483,137 @@ class TestGetContentTypeRankings:
             analysis_date = result.get("metadata", {}).get("analysis_date")
             # The presence of analysis_date in metadata indicates fix is applied
             assert analysis_date is not None or result["total_types"] == 0
+
+
+class TestGetCreatorProfilePersonaBundling:
+    """Tests for persona bundling in get_creator_profile."""
+
+    def test_include_persona_flag(self):
+        """Test include_persona=True includes persona section."""
+        result = get_creator_profile("maya_hill", include_persona=True)
+        if result.get("found"):
+            assert "persona" in result
+            persona = result.get("persona", {})
+            # Check required persona fields
+            assert "primary_tone" in persona
+            assert "_default" in persona
+
+    def test_exclude_persona_flag(self):
+        """Test include_persona=False excludes persona section."""
+        result = get_creator_profile("maya_hill", include_persona=False)
+        if result.get("found"):
+            assert "persona" not in result
+
+    def test_persona_default_fallback(self):
+        """Test persona returns default values for creator without persona record."""
+        # Use a creator that might not have a persona configured
+        result = get_creator_profile("maya_hill", include_persona=True)
+        if result.get("found") and result.get("persona"):
+            persona = result["persona"]
+            # Should have _default flag
+            assert "_default" in persona
+            # If default, verify expected default values
+            if persona.get("_default"):
+                assert persona["primary_tone"] == "playful"
+                assert persona["emoji_frequency"] == "moderate"
+                assert persona["slang_level"] == "light"
+
+    def test_persona_valid_tone_values(self):
+        """Test persona has valid tone values."""
+        result = get_creator_profile("maya_hill", include_persona=True)
+        if result.get("found") and result.get("persona"):
+            persona = result["persona"]
+            valid_tones = ("playful", "aggressive", "seductive", "sultry")
+            if persona.get("primary_tone"):
+                assert persona["primary_tone"] in valid_tones
+
+    def test_persona_valid_emoji_frequency(self):
+        """Test persona has valid emoji_frequency values."""
+        result = get_creator_profile("maya_hill", include_persona=True)
+        if result.get("found") and result.get("persona"):
+            persona = result["persona"]
+            valid_freq = ("heavy", "moderate", "light", "none")
+            if persona.get("emoji_frequency"):
+                assert persona["emoji_frequency"] in valid_freq
+
+    def test_persona_valid_slang_level(self):
+        """Test persona has valid slang_level values."""
+        result = get_creator_profile("maya_hill", include_persona=True)
+        if result.get("found") and result.get("persona"):
+            persona = result["persona"]
+            valid_slang = ("none", "light", "heavy")
+            if persona.get("slang_level"):
+                assert persona["slang_level"] in valid_slang
+
+    def test_metadata_includes_persona_flag(self):
+        """Test metadata includes persona in include_flags."""
+        result = get_creator_profile("maya_hill", include_persona=True)
+        if result.get("found"):
+            metadata = result.get("metadata", {})
+            include_flags = metadata.get("include_flags", {})
+            assert "persona" in include_flags
+            assert include_flags["persona"] is True
+
+    def test_mcp_calls_saved_with_persona(self):
+        """Test mcp_calls_saved includes persona bundling."""
+        result = get_creator_profile(
+            "maya_hill",
+            include_analytics=True,
+            include_volume=True,
+            include_content_rankings=True,
+            include_vault=True,
+            include_persona=True
+        )
+        if result.get("found"):
+            metadata = result.get("metadata", {})
+            # Should be 5 with persona included
+            assert metadata.get("mcp_calls_saved") == 5
+
+
+class TestGetCreatorProfilePersonaBundlingMock:
+    """Tests for persona bundling using MockMCPClient."""
+
+    @pytest.mark.asyncio
+    async def test_mock_get_creator_profile_includes_persona(self):
+        """Verify bundled response includes persona when requested."""
+        from .mocks import MockMCPClient, TestDataFactory
+
+        mcp = MockMCPClient(TestDataFactory.STANDARD)
+
+        # With persona (default)
+        result = await mcp.get_creator_profile("test_creator")
+        assert "persona" in result
+        assert result["persona"]["primary_tone"] in ("playful", "aggressive", "seductive", "sultry")
+        assert result["persona"]["emoji_frequency"] in ("heavy", "moderate", "light", "none")
+        assert result["persona"]["slang_level"] in ("none", "light", "heavy")
+        assert "_default" in result["persona"]
+
+    @pytest.mark.asyncio
+    async def test_mock_get_creator_profile_excludes_persona_when_disabled(self):
+        """Verify persona excluded when include_persona=False."""
+        from .mocks import MockMCPClient, TestDataFactory
+
+        mcp = MockMCPClient(TestDataFactory.STANDARD)
+
+        result = await mcp.get_creator_profile("test_creator", include_persona=False)
+        assert "persona" not in result
+
+    @pytest.mark.asyncio
+    async def test_mock_get_creator_profile_persona_uses_config(self):
+        """Verify persona values come from CreatorConfig."""
+        from .mocks import MockMCPClient, CreatorConfig
+
+        config = CreatorConfig(
+            persona_tone="aggressive",
+            emoji_frequency="heavy",
+            slang_level="none"
+        )
+        mcp = MockMCPClient(config)
+
+        result = await mcp.get_creator_profile("test_creator")
+        assert result["persona"]["primary_tone"] == "aggressive"
+        assert result["persona"]["emoji_frequency"] == "heavy"
+        assert result["persona"]["slang_level"] == "none"
 
 
 if __name__ == "__main__":

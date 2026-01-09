@@ -161,6 +161,29 @@ class EROSOrchestrator:
     # --- Prompt Builders ---
     def _build_generator_prompt(self, ctx: CreatorContext) -> str:
         vol = ctx.volume_config
+        persona = ctx.persona
+
+        # Build voice context string (v1.5.0)
+        voice_parts = [f"tone: {persona.get('primary_tone', 'playful')}"]
+        if persona.get('secondary_tone'):
+            voice_parts[0] += f"/{persona.get('secondary_tone')}"
+        voice_parts.append(f"emoji: {persona.get('emoji_frequency', 'moderate')}")
+        voice_parts.append(f"slang: {persona.get('slang_level', 'light')}")
+        voice_context = ", ".join(voice_parts)
+
+        # Build emoji guidance based on persona (v1.5.0)
+        emoji_freq = persona.get('emoji_frequency', 'moderate')
+        if emoji_freq == 'heavy':
+            emoji_guidance = "Heavy emoji use is appropriate and on-brand."
+        elif emoji_freq == 'none':
+            emoji_guidance = "Avoid emoji-heavy captions. Minimal emojis preferred."
+        elif emoji_freq == 'light':
+            emoji_guidance = "Use emojis sparingly."
+        else:  # moderate
+            emoji_guidance = ""
+
+        primary_tone = persona.get('primary_tone', 'playful')
+
         return f"""You are schedule-generator. Build a weekly schedule for {ctx.creator_id}.
 
 OUTPUT: Return JSON with "items" and "followups" arrays.
@@ -171,8 +194,11 @@ CONTEXT:
 - avoid_types (NEVER use): {json.dumps(list(ctx.avoid_types))}
 - volume: tier={vol.get('tier')}, rev={vol.get('revenue_per_day')}, eng={vol.get('engagement_per_day')}, ret={vol.get('retention_per_day')}
 - pricing: base=${ctx.pricing_config.get('base_price', 15)}, floor=$5, ceiling=$50
+- voice: {voice_context}
 
 CONSTRAINTS: PPV max 4/day | Followup max 5/day | Min gap 45min | Dead zone 3-7AM | Jitter ±7-8min (avoid :00/:15/:30/:45)
+
+STYLE: Match creator's {primary_tone} tone when selecting between similar captions. {emoji_guidance}
 
 ITEM: {{"send_type_key": "ppv_unlock", "caption_id": 123, "content_type": "lingerie", "scheduled_date": "2026-01-06", "scheduled_time": "19:23", "price": 15.00, "flyer_required": 1, "channel_key": "mass_message"}}
 FOLLOWUP: {{"parent_item_index": 0, "send_type_key": "ppv_followup", "scheduled_time": "19:51", "delay_minutes": 28}}

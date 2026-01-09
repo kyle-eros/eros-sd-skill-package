@@ -31,7 +31,7 @@ Build optimized weekly schedule items from CreatorContext. Select captions, assi
 
 ## Input: CreatorContext
 
-Received from Phase 1 (preflight.py) - now uses bundled `get_creator_profile` response (v1.1.0):
+Received from Phase 1 (preflight.py) - uses bundled `get_creator_profile` response (v1.5.0):
 
 ```json
 {
@@ -57,13 +57,29 @@ Received from Phase 1 (preflight.py) - now uses bundled `get_creator_profile` re
     "avg_rps": 145.00,
     "avg_open_rate": 0.42
   },
-  "persona": {...},
+  "persona": {
+    "primary_tone": "playful",
+    "secondary_tone": "bratty",
+    "emoji_frequency": "moderate",
+    "slang_level": "light",
+    "_default": false
+  },
   "active_triggers": [...],
   "pricing_config": {...}
 }
 ```
 
-> **Note**: `analytics_summary`, `volume_config`, `avoid_types`, and `top_content_types` are now bundled in the `get_creator_profile` response, reducing preflight MCP calls from 7 to 4.
+> **Note**: `analytics_summary`, `volume_config`, `avoid_types`, `top_content_types`, and **`persona`** are now bundled in the `get_creator_profile` response, reducing preflight MCP calls from 7 to 3.
+
+## Voice Matching (NEW)
+
+The CONTEXT includes persona voice settings. When selecting captions:
+- Match the creator's `primary_tone` when choosing between similar captions
+- Respect `emoji_frequency`:
+  - **heavy**: Emoji-rich captions are on-brand
+  - **none**: Avoid emoji-heavy options
+  - **light/moderate**: Standard selection
+- The STYLE section in the prompt provides explicit guidance
 
 ---
 
