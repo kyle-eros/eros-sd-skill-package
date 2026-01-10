@@ -40,8 +40,13 @@ class LearningSignal:
 class FeedbackCapture:
     """Captures learning signals and persists to LEARNINGS.md."""
 
-    def __init__(self, learnings_path: Path | None = None):
-        self.learnings_path = learnings_path or LEARNINGS_PATH
+    def __init__(self, learnings_path: Path | str | None = None):
+        if learnings_path is None:
+            self.learnings_path = LEARNINGS_PATH
+        elif isinstance(learnings_path, str):
+            self.learnings_path = Path(learnings_path)
+        else:
+            self.learnings_path = learnings_path
 
     def capture_validation_result(self, creator_id: str, certificate: dict, schedule: dict) -> list[LearningSignal]:
         """Extract signals from validation: HIGH for violations, MEDIUM for quality>=85."""
