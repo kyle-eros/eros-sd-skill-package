@@ -5,6 +5,43 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0] - 2026-01-10
+
+### Changed
+- **BREAKING (internal)**: `save_volume_triggers` now uses correct column names
+  - `adjustment_value` → `adjustment_multiplier`
+  - `created_at` → `detected_at`
+- Trigger thresholds now scale-aware (conversion-first, not RPS-first)
+- Preflight passes DB triggers via `trigger_overrides` (eliminates duplicate query)
+
+### Added
+- `get_active_volume_triggers` enhanced response v2.0:
+  - `compound_multiplier` - pre-calculated compound value
+  - `compound_calculation` - per-content-type breakdown
+  - `has_conflicting_signals` - flags BOOST+REDUCE on same content
+  - `zero_triggers_context` - diagnostics when no triggers
+  - `metadata` block with hash and timestamps
+  - `creator_context` with fan_count and tier
+- `volume_utils.py` trigger constants:
+  - `TRIGGER_THRESHOLDS` - canonical threshold definitions
+  - `validate_trigger()` - input validation function
+  - `calculate_compound_multiplier()` - compound calculation
+  - `TRIGGER_MULT_MIN/MAX` - compound bounds [0.50, 2.00]
+- Database migration script for indexes on `volume_triggers` table
+- Three-tier test suite (unit, integration, preflight)
+- `adapters.py` support for `trigger_overrides` parameter
+
+### Fixed
+- `save_volume_triggers` column name bugs (CRITICAL)
+- Trigger deduplication in preflight (DB + runtime merge)
+- Missing `metrics_json` in SELECT and INSERT
+- `FeedbackCapture` now accepts string paths (was only Path objects)
+
+### Deprecated
+- RPS-only trigger detection (conversion rate now primary signal)
+
+---
+
 ## [1.6.0] - 2026-01-08
 
 ### Added

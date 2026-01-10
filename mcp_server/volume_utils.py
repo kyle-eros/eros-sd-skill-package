@@ -15,8 +15,8 @@ from __future__ import annotations
 
 import calendar
 import hashlib
-from datetime import date, timedelta
-from typing import Final, Literal
+from datetime import date, datetime, timedelta
+from typing import Final, Literal, TypedDict
 
 # =============================================================================
 # TIER CONSTANTS - THE CANONICAL DEFINITION
@@ -378,3 +378,227 @@ def get_day_name(target_date: date) -> str:
         Day name string: 'monday', 'tuesday', etc.
     """
     return DAY_NAMES[target_date.weekday()]
+
+
+# =============================================================================
+# TRIGGER SYSTEM CONSTANTS - SINGLE SOURCE OF TRUTH
+# =============================================================================
+
+TRIGGER_MULT_MIN: Final[float] = 0.50
+TRIGGER_MULT_MAX: Final[float] = 2.00
+TRIGGER_DEFAULT_TTL_DAYS: Final[int] = 7
+
+VALID_TRIGGER_TYPES: Final[frozenset] = frozenset({
+    "HIGH_PERFORMER",
+    "TRENDING_UP",
+    "EMERGING_WINNER",
+    "SATURATING",
+    "AUDIENCE_FATIGUE"
+})
+
+# Scale-aware detection thresholds (conversion-first, not RPS-first)
+# Reference: docs/DOMAIN_KNOWLEDGE.md Section 8
+TRIGGER_THRESHOLDS: Final[dict] = {
+    "HIGH_PERFORMER": {
+        "min_conversion": 6.0,  # PRIMARY - scale-independent
+        "min_weekly_revenue_percentile": 80,  # OR top 20% of own history
+        "min_rps_normalized": 1.5,  # Per 1k fans (secondary)
+        "multiplier": 1.20
+    },
+    "TRENDING_UP": {
+        "min_wow_revenue_change": 15,  # Week-over-week revenue growth
+        "min_wow_conversion_change": 10,  # OR conversion improving
+        "multiplier": 1.10
+    },
+    "EMERGING_WINNER": {
+        "min_conversion": 5.0,  # Good conversion
+        "max_uses_30d": 3,  # Underutilized
+        "min_rps_normalized": 1.0,
+        "multiplier": 1.30
+    },
+    "SATURATING": {
+        "min_decline_days": 3,  # Declining conversion days
+        "metric": "conversion_rate",
+        "multiplier": 0.85
+    },
+    "AUDIENCE_FATIGUE": {
+        "max_open_rate_change": -10,  # Open rate dropped
+        "max_conversion_change": -15,  # OR conversion dropped
+        "multiplier": 0.75
+    },
+}
+
+CONFIDENCE_THRESHOLDS: Final[dict] = {
+    "high": 10,      # > 10 sends analyzed
+    "moderate": 5,   # 5-10 sends
+    "low": 0         # < 5 sends
+}
+
+ZERO_TRIGGER_REASONS: Final[dict] = {
+    "all_expired": "All triggers have passed their expires_at",
+    "never_had_triggers": "No trigger history for this creator",
+    "all_inactive": "Triggers exist but all marked is_active=0",
+    "creator_new": "Creator has < 7 days of performance data",
+    "no_qualifying_performance": "Historical triggers but none currently active"
+}
+
+
+class TriggerInput(TypedDict, total=False):
+    """Input schema for save_volume_triggers validation."""
+    trigger_type: Literal["HIGH_PERFORMER", "TRENDING_UP", "EMERGING_WINNER", "SATURATING", "AUDIENCE_FATIGUE"]
+    content_type: str
+    adjustment_multiplier: float
+    confidence: Literal["low", "moderate", "high"]
+    reason: str
+    expires_at: str
+    metrics_json: dict
+
+
+def validate_trigger(trigger: dict, index: int = 0) -> tuple[bool, dict | str]:
+    """
+    Validate and normalize a trigger object for save_volume_triggers.
+
+    Args:
+        trigger: Raw trigger dict from caller
+        index: Position in batch for error messages
+
+    Returns:
+        (True, normalized_trigger) on success
+        (False, error_message) on validation failure
+
+    Validation Tiers:
+        STRICT (reject): trigger_type, content_type, adjustment_multiplier
+        LENIENT (default): confidence, reason, expires_at, metrics_json
+    """
+    errors = []
+    warnings = []
+
+    # TIER 1: Required fields - strict reject
+    trigger_type = trigger.get("trigger_type")
+    if not trigger_type:
+        errors.append(f"trigger[{index}]: missing required field 'trigger_type'")
+    elif trigger_type not in VALID_TRIGGER_TYPES:
+        errors.append(f"trigger[{index}]: invalid trigger_type '{trigger_type}', must be one of {VALID_TRIGGER_TYPES}")
+
+    content_type = trigger.get("content_type")
+    if not content_type or not str(content_type).strip():
+        errors.append(f"trigger[{index}]: missing required field 'content_type'")
+
+    multiplier = trigger.get("adjustment_multiplier")
+    if multiplier is None:
+        errors.append(f"trigger[{index}]: missing required field 'adjustment_multiplier'")
+    elif not isinstance(multiplier, (int, float)):
+        errors.append(f"trigger[{index}]: adjustment_multiplier must be numeric, got {type(multiplier).__name__}")
+    elif not (TRIGGER_MULT_MIN <= multiplier <= TRIGGER_MULT_MAX):
+        errors.append(f"trigger[{index}]: adjustment_multiplier {multiplier} outside valid range [{TRIGGER_MULT_MIN}, {TRIGGER_MULT_MAX}]")
+
+    # Fail fast on required field errors
+    if errors:
+        return (False, "; ".join(errors))
+
+    # TIER 2: Optional fields - coerce/default
+    confidence = trigger.get("confidence", "moderate")
+    if confidence not in ("low", "moderate", "high"):
+        confidence = "moderate"
+        warnings.append(f"trigger[{index}]: invalid confidence '{trigger.get('confidence')}', defaulting to 'moderate'")
+
+    reason = str(trigger.get("reason", ""))[:500]  # Truncate to max length
+
+    expires_at = trigger.get("expires_at")
+    if not expires_at:
+        expires_at = (datetime.now() + timedelta(days=TRIGGER_DEFAULT_TTL_DAYS)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    metrics_json = trigger.get("metrics_json", {})
+    if not isinstance(metrics_json, dict):
+        metrics_json = {}
+        warnings.append(f"trigger[{index}]: invalid metrics_json type, defaulting to empty")
+
+    # TIER 3: Warnings for suspicious values (don't reject)
+    if multiplier < 0.70 or multiplier > 1.50:
+        warnings.append(f"trigger[{index}]: extreme multiplier {multiplier} - verify intentional")
+
+    if not metrics_json:
+        warnings.append(f"trigger[{index}]: missing metrics_json - detection evidence not recorded")
+
+    # Return normalized trigger
+    normalized = {
+        "trigger_type": trigger_type,
+        "content_type": content_type.strip(),
+        "adjustment_multiplier": round(float(multiplier), 4),
+        "confidence": confidence,
+        "reason": reason,
+        "expires_at": expires_at,
+        "metrics_json": metrics_json,
+        "_warnings": warnings if warnings else None
+    }
+
+    return (True, normalized)
+
+
+def calculate_compound_multiplier(triggers: list[dict]) -> tuple[float, list[dict], bool]:
+    """
+    Calculate compound multiplier with per-content-type grouping.
+
+    Args:
+        triggers: List of trigger dicts with content_type and adjustment_multiplier
+
+    Returns:
+        (global_compound, compound_calculation, has_conflicting_signals)
+
+    Example:
+        >>> triggers = [
+        ...     {"content_type": "lingerie", "trigger_type": "HIGH_PERFORMER", "adjustment_multiplier": 1.2},
+        ...     {"content_type": "lingerie", "trigger_type": "SATURATING", "adjustment_multiplier": 0.85}
+        ... ]
+        >>> calculate_compound_multiplier(triggers)
+        (1.02, [{"content_type": "lingerie", "compound": 1.02, "clamped": False}], True)
+    """
+    from collections import defaultdict
+
+    if not triggers:
+        return (1.0, [], False)
+
+    by_content_type = defaultdict(list)
+    for t in triggers:
+        by_content_type[t.get("content_type", "_unknown")].append(t)
+
+    compound_calculation = []
+    has_conflict = False
+
+    for ct, ct_triggers in by_content_type.items():
+        boost = [t for t in ct_triggers if t.get("adjustment_multiplier", 1.0) > 1.0]
+        reduce = [t for t in ct_triggers if t.get("adjustment_multiplier", 1.0) < 1.0]
+
+        if boost and reduce:
+            has_conflict = True
+
+        compound = 1.0
+        trigger_strs = []
+        for t in ct_triggers:
+            mult = t.get("adjustment_multiplier", 1.0)
+            compound *= mult
+            trigger_strs.append(f"{t.get('trigger_type', 'UNKNOWN')}:{mult}")
+
+        # Clamp to bounds
+        clamped = False
+        if compound < TRIGGER_MULT_MIN:
+            compound = TRIGGER_MULT_MIN
+            clamped = True
+        elif compound > TRIGGER_MULT_MAX:
+            compound = TRIGGER_MULT_MAX
+            clamped = True
+
+        compound_calculation.append({
+            "content_type": ct,
+            "triggers": trigger_strs,
+            "compound": round(compound, 4),
+            "clamped": clamped
+        })
+
+    # Global compound (multiply all per-content-type compounds)
+    global_compound = 1.0
+    for calc in compound_calculation:
+        global_compound *= calc["compound"]
+    global_compound = max(TRIGGER_MULT_MIN, min(TRIGGER_MULT_MAX, round(global_compound, 4)))
+
+    return (global_compound, compound_calculation, has_conflict)

@@ -525,3 +525,162 @@ class TestDayNamesConstant:
         """All day names should be lowercase."""
         for day in DAY_NAMES:
             assert day == day.lower()
+
+
+# =============================================================================
+# TRIGGER SYSTEM TESTS (Added for v2.0 refactoring)
+# =============================================================================
+
+from volume_utils import (
+    TRIGGER_MULT_MIN, TRIGGER_MULT_MAX, VALID_TRIGGER_TYPES,
+    TRIGGER_THRESHOLDS, CONFIDENCE_THRESHOLDS,
+    validate_trigger, calculate_compound_multiplier
+)
+
+
+class TestTriggerConstants:
+    """Test trigger-related constants."""
+
+    def test_trigger_mult_bounds(self):
+        assert TRIGGER_MULT_MIN == 0.50
+        assert TRIGGER_MULT_MAX == 2.00
+        assert TRIGGER_MULT_MIN < TRIGGER_MULT_MAX
+
+    def test_valid_trigger_types(self):
+        assert len(VALID_TRIGGER_TYPES) == 5
+        assert "HIGH_PERFORMER" in VALID_TRIGGER_TYPES
+        assert "SATURATING" in VALID_TRIGGER_TYPES
+
+    def test_trigger_thresholds_complete(self):
+        for tt in VALID_TRIGGER_TYPES:
+            assert tt in TRIGGER_THRESHOLDS
+            assert "multiplier" in TRIGGER_THRESHOLDS[tt]
+
+    def test_confidence_thresholds(self):
+        assert CONFIDENCE_THRESHOLDS["high"] == 10
+        assert CONFIDENCE_THRESHOLDS["moderate"] == 5
+        assert CONFIDENCE_THRESHOLDS["low"] == 0
+
+
+class TestValidateTrigger:
+    """Test validate_trigger function."""
+
+    def test_valid_minimal_trigger(self):
+        is_valid, result = validate_trigger({
+            "trigger_type": "HIGH_PERFORMER",
+            "content_type": "lingerie",
+            "adjustment_multiplier": 1.2
+        })
+        assert is_valid
+        assert result["trigger_type"] == "HIGH_PERFORMER"
+        assert result["confidence"] == "moderate"  # defaulted
+        assert result["expires_at"] is not None  # defaulted
+
+    def test_rejects_invalid_trigger_type(self):
+        is_valid, error = validate_trigger({
+            "trigger_type": "INVALID",
+            "content_type": "lingerie",
+            "adjustment_multiplier": 1.2
+        })
+        assert not is_valid
+        assert "must be one of" in error
+
+    def test_rejects_missing_content_type(self):
+        is_valid, error = validate_trigger({
+            "trigger_type": "HIGH_PERFORMER",
+            "adjustment_multiplier": 1.2
+        })
+        assert not is_valid
+        assert "content_type" in error
+
+    def test_rejects_multiplier_out_of_bounds(self):
+        is_valid, error = validate_trigger({
+            "trigger_type": "HIGH_PERFORMER",
+            "content_type": "lingerie",
+            "adjustment_multiplier": 5.0  # > 2.0 max
+        })
+        assert not is_valid
+        assert "outside valid range" in error
+
+    def test_warns_on_extreme_multiplier(self):
+        is_valid, result = validate_trigger({
+            "trigger_type": "HIGH_PERFORMER",
+            "content_type": "lingerie",
+            "adjustment_multiplier": 0.55  # Valid but extreme
+        })
+        assert is_valid
+        assert result["_warnings"] is not None
+        assert any("extreme" in w for w in result["_warnings"])
+
+    def test_defaults_confidence(self):
+        is_valid, result = validate_trigger({
+            "trigger_type": "HIGH_PERFORMER",
+            "content_type": "lingerie",
+            "adjustment_multiplier": 1.2,
+            "confidence": "invalid_value"
+        })
+        assert is_valid
+        assert result["confidence"] == "moderate"
+
+    def test_truncates_long_reason(self):
+        is_valid, result = validate_trigger({
+            "trigger_type": "HIGH_PERFORMER",
+            "content_type": "lingerie",
+            "adjustment_multiplier": 1.2,
+            "reason": "x" * 1000
+        })
+        assert is_valid
+        assert len(result["reason"]) == 500
+
+
+class TestCompoundMultiplier:
+    """Test compound multiplier calculation."""
+
+    def test_single_trigger(self):
+        triggers = [{"content_type": "x", "trigger_type": "HIGH_PERFORMER", "adjustment_multiplier": 1.2}]
+        compound, calc, conflict = calculate_compound_multiplier(triggers)
+        assert compound == 1.2
+        assert not conflict
+
+    def test_multiplicative_same_content_type(self):
+        triggers = [
+            {"content_type": "lingerie", "trigger_type": "HIGH_PERFORMER", "adjustment_multiplier": 1.2},
+            {"content_type": "lingerie", "trigger_type": "SATURATING", "adjustment_multiplier": 0.85}
+        ]
+        compound, calc, conflict = calculate_compound_multiplier(triggers)
+        assert compound == pytest.approx(1.02, rel=1e-3)
+        assert conflict  # BOOST + REDUCE = conflict
+
+    def test_clamping_at_max(self):
+        triggers = [
+            {"content_type": "x", "trigger_type": "A", "adjustment_multiplier": 1.5},
+            {"content_type": "x", "trigger_type": "B", "adjustment_multiplier": 1.5}
+        ]  # 2.25x unclamped
+        compound, calc, conflict = calculate_compound_multiplier(triggers)
+        assert compound == 2.0  # Clamped
+        assert calc[0]["clamped"] == True
+
+    def test_clamping_at_min(self):
+        triggers = [
+            {"content_type": "x", "trigger_type": "A", "adjustment_multiplier": 0.6},
+            {"content_type": "x", "trigger_type": "B", "adjustment_multiplier": 0.6}
+        ]  # 0.36x unclamped
+        compound, calc, conflict = calculate_compound_multiplier(triggers)
+        assert compound == 0.5  # Clamped to min
+        assert calc[0]["clamped"] == True
+
+    def test_empty_triggers(self):
+        compound, calc, conflict = calculate_compound_multiplier([])
+        assert compound == 1.0
+        assert calc == []
+        assert not conflict
+
+    def test_multiple_content_types(self):
+        triggers = [
+            {"content_type": "lingerie", "trigger_type": "HIGH_PERFORMER", "adjustment_multiplier": 1.2},
+            {"content_type": "bikini", "trigger_type": "TRENDING_UP", "adjustment_multiplier": 1.1}
+        ]
+        compound, calc, conflict = calculate_compound_multiplier(triggers)
+        assert compound == pytest.approx(1.32, rel=1e-3)  # 1.2 * 1.1
+        assert len(calc) == 2
+        assert not conflict  # Different content types don't conflict

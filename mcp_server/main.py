@@ -1734,54 +1734,228 @@ def get_volume_config(
 
 @mcp.tool()
 def get_active_volume_triggers(creator_id: str) -> dict:
-    """Returns active performance-based volume triggers.
+    """Returns active performance-based volume triggers with compound calculations.
 
     MCP Name: mcp__eros-db__get_active_volume_triggers
+    Version: 2.0.0
+
+    This tool retrieves PERSISTED triggers from the database only.
+    Runtime trigger detection happens separately in preflight.py._detect_triggers().
 
     Args:
-        creator_id: Creator identifier
+        creator_id: Creator identifier (creator_id or page_name)
 
     Returns:
-        List of active triggers with adjustments
+        dict with structure:
+        - creator_id: Input echoed
+        - creator_id_resolved: Actual DB key used
+        - triggers: List of active trigger objects
+        - count: Number of triggers
+        - compound_multiplier: Pre-calculated compound (clamped to [0.50, 2.00])
+        - compound_calculation: Per-content-type breakdown
+        - has_conflicting_signals: True if BOOST and REDUCE triggers coexist
+        - creator_context: Fan count and tier for scale interpretation
+        - zero_triggers_context: Diagnostics when count=0 (null otherwise)
+        - metadata: Hash, timestamps, thresholds version
+
+    Response Stability:
+        STABLE: creator_id, triggers, count, all trigger fields
+        ADDED v2.0: compound_*, metadata, creator_context, zero_triggers_context
+
+    See Also:
+        - save_volume_triggers: Persist new triggers
+        - volume_utils.TRIGGER_THRESHOLDS: Detection criteria constants
+        - preflight._detect_triggers: Runtime detection logic
     """
+    import hashlib
+    from datetime import datetime
+    # CRITICAL: Use relative import (we're inside mcp_server/)
+    from volume_utils import (
+        TRIGGER_MULT_MIN, TRIGGER_MULT_MAX,
+        calculate_compound_multiplier,
+        ZERO_TRIGGER_REASONS
+    )
+
+    start_time = datetime.now()
     logger.info(f"get_active_volume_triggers: creator_id={creator_id}")
-    try:
-        triggers = db_query("""
-            SELECT vt.content_type, vt.trigger_type, vt.adjustment_multiplier,
-                   vt.confidence, vt.reason, vt.expires_at
-            FROM volume_triggers vt
-            WHERE vt.creator_id = ?
-            AND vt.is_active = 1
-            AND (vt.expires_at IS NULL OR vt.expires_at > datetime('now'))
-            ORDER BY vt.adjustment_multiplier DESC
-        """, (creator_id,))
 
-        # Also try by page_name
-        if not triggers:
-            creator = db_query(
-                "SELECT creator_id FROM creators WHERE page_name = ? LIMIT 1",
-                (creator_id,)
-            )
-            if creator:
-                triggers = db_query("""
-                    SELECT vt.content_type, vt.trigger_type, vt.adjustment_multiplier,
-                           vt.confidence, vt.reason, vt.expires_at
-                    FROM volume_triggers vt
-                    WHERE vt.creator_id = ?
-                    AND vt.is_active = 1
-                    AND (vt.expires_at IS NULL OR vt.expires_at > datetime('now'))
-                    ORDER BY vt.adjustment_multiplier DESC
-                """, (creator[0]['creator_id'],))
-
+    # Validate input
+    if not creator_id or not creator_id.strip():
         return {
+            "error": "creator_id is required",
+            "error_code": "INVALID_INPUT",
             "creator_id": creator_id,
-            "triggers": triggers,
-            "count": len(triggers)
+            "triggers": [],
+            "count": 0
         }
+
+    creator_id_resolved = None
+    creator_context = {"fan_count": 0, "tier": "MINIMAL", "page_type": "paid"}
+
+    try:
+        with get_db_connection() as conn:
+            # Resolve creator_id or page_name
+            creator_row = conn.execute("""
+                SELECT c.creator_id, c.page_name, c.current_fan_count, c.page_type,
+                       (SELECT volume_level FROM volume_assignments
+                        WHERE creator_id = c.creator_id AND is_active = 1
+                        ORDER BY assigned_at DESC LIMIT 1) as tier
+                FROM creators c
+                WHERE c.creator_id = ? OR c.page_name = ?
+                LIMIT 1
+            """, (creator_id, creator_id)).fetchone()
+
+            if not creator_row:
+                return {
+                    "error": f"Creator not found: {creator_id}",
+                    "error_code": "CREATOR_NOT_FOUND",
+                    "creator_id": creator_id,
+                    "triggers": [],
+                    "count": 0
+                }
+
+            creator_id_resolved = creator_row[0]
+            creator_context = {
+                "fan_count": creator_row[2] or 0,
+                "tier": creator_row[4] or "MINIMAL",
+                "page_type": creator_row[3] or "paid"
+            }
+
+            # Fetch active triggers
+            triggers_rows = conn.execute("""
+                SELECT
+                    vt.trigger_id,
+                    vt.content_type,
+                    vt.trigger_type,
+                    vt.adjustment_multiplier,
+                    vt.confidence,
+                    vt.reason,
+                    vt.expires_at,
+                    vt.detected_at,
+                    vt.metrics_json,
+                    vt.applied_count,
+                    vt.last_applied_at,
+                    CAST(julianday(vt.expires_at) - julianday('now') AS INTEGER) as days_until_expiry,
+                    CAST(julianday('now') - julianday(vt.detected_at) AS INTEGER) as days_since_detected
+                FROM volume_triggers vt
+                WHERE vt.creator_id = ?
+                  AND vt.is_active = 1
+                  AND (vt.expires_at IS NULL OR vt.expires_at > datetime('now'))
+                ORDER BY vt.adjustment_multiplier DESC
+            """, (creator_id_resolved,)).fetchall()
+
+            # Build trigger objects
+            triggers = []
+            trigger_ids = []
+            for row in triggers_rows:
+                metrics_json = {}
+                if row[8]:
+                    try:
+                        metrics_json = json.loads(row[8])
+                    except json.JSONDecodeError:
+                        metrics_json = {}
+
+                trigger_ids.append(row[0])
+                triggers.append({
+                    "trigger_id": row[0],
+                    "content_type": row[1],
+                    "trigger_type": row[2],
+                    "adjustment_multiplier": row[3],
+                    "confidence": row[4],
+                    "reason": row[5],
+                    "expires_at": row[6],
+                    "detected_at": row[7],
+                    "metrics_json": metrics_json,
+                    "source": "database",
+                    "applied_count": row[9] or 0,
+                    "last_applied_at": row[10],
+                    "days_until_expiry": row[11],
+                    "days_since_detected": row[12]
+                })
+
+            # Calculate compound multiplier
+            compound_mult, compound_calc, has_conflict = calculate_compound_multiplier(triggers)
+
+            # Zero triggers diagnostics (only when count=0)
+            zero_context = None
+            if not triggers:
+                diag_row = conn.execute("""
+                    SELECT
+                        MAX(CASE WHEN expires_at <= datetime('now') OR is_active = 0
+                            THEN expires_at END) as last_trigger_expired_at,
+                        (SELECT trigger_type FROM volume_triggers
+                         WHERE creator_id = ? ORDER BY detected_at DESC LIMIT 1) as last_trigger_type,
+                        (SELECT content_type FROM volume_triggers
+                         WHERE creator_id = ? ORDER BY detected_at DESC LIMIT 1) as last_trigger_content_type,
+                        COUNT(*) as historical_trigger_count,
+                        SUM(CASE WHEN expires_at > datetime('now', '-7 days')
+                                 AND expires_at <= datetime('now') THEN 1 ELSE 0 END) as triggers_expired_last_7d
+                    FROM volume_triggers
+                    WHERE creator_id = ?
+                """, (creator_id_resolved, creator_id_resolved, creator_id_resolved)).fetchone()
+
+                # Determine reason
+                hist_count = diag_row[3] or 0
+                expired_7d = diag_row[4] or 0
+
+                if hist_count == 0:
+                    reason = "never_had_triggers"
+                elif expired_7d > 0:
+                    reason = "all_expired"
+                else:
+                    reason = "no_qualifying_performance"
+
+                zero_context = {
+                    "reason": reason,
+                    "reason_description": ZERO_TRIGGER_REASONS.get(reason, ""),
+                    "last_trigger_expired_at": diag_row[0],
+                    "last_trigger_type": diag_row[1],
+                    "last_trigger_content_type": diag_row[2],
+                    "historical_trigger_count": hist_count,
+                    "triggers_expired_last_7d": expired_7d
+                }
+
+            # Compute hash for cache invalidation
+            hash_inputs = [
+                f"creator:{creator_id_resolved}",
+                f"trigger_ids:{sorted(trigger_ids)}",
+                f"expires:{[t['expires_at'] for t in triggers]}"
+            ]
+            triggers_hash = hashlib.sha256(
+                json.dumps(hash_inputs, sort_keys=True).encode()
+            ).hexdigest()[:16]
+
+            query_ms = (datetime.now() - start_time).total_seconds() * 1000
+
+            return {
+                "creator_id": creator_id,
+                "creator_id_resolved": creator_id_resolved,
+                "triggers": triggers,
+                "count": len(triggers),
+                "compound_multiplier": compound_mult,
+                "compound_calculation": compound_calc,
+                "has_conflicting_signals": has_conflict,
+                "creator_context": creator_context,
+                "zero_triggers_context": zero_context,
+                "metadata": {
+                    "fetched_at": datetime.now().isoformat() + "Z",
+                    "triggers_hash": f"sha256:{triggers_hash}",
+                    "hash_inputs": hash_inputs,
+                    "query_ms": round(query_ms, 2),
+                    "thresholds_version": "2.0",
+                    "scale_aware": True
+                }
+            }
 
     except Exception as e:
         logger.error(f"get_active_volume_triggers error: {e}")
-        return {"error": str(e), "triggers": [], "count": 0}
+        return {
+            "error": f"Database error: {str(e)}",
+            "error_code": "DATABASE_ERROR",
+            "creator_id": creator_id,
+            "triggers": [],
+            "count": 0
+        }
 
 
 @mcp.tool()
@@ -1944,62 +2118,148 @@ def save_schedule(
 
 @mcp.tool()
 def save_volume_triggers(creator_id: str, triggers: list) -> dict:
-    """Persists detected volume triggers.
+    """Persists detected volume triggers with validation.
 
     MCP Name: mcp__eros-db__save_volume_triggers
+    Version: 2.0.0
+
+    CRITICAL FIX v2.0: Uses correct column names per schema:
+    - adjustment_multiplier (NOT adjustment_value)
+    - detected_at (NOT created_at)
 
     Args:
-        creator_id: Creator identifier
-        triggers: List of trigger objects
+        creator_id: Creator identifier (creator_id or page_name)
+        triggers: List of trigger objects to persist
+
+    Trigger Object Schema:
+        REQUIRED: trigger_type, content_type, adjustment_multiplier
+        OPTIONAL: confidence (default 'moderate'), reason, expires_at (default +7d), metrics_json
 
     Returns:
-        Result with count of triggers saved
+        dict with:
+        - success: bool
+        - triggers_saved: int
+        - creator_id: echoed input
+        - warnings: list[str] if suspicious values detected
+        - error: str if failed
+        - validation_errors: list[str] if validation failed
+
+    Validation:
+        - Rejects entire batch if ANY trigger has invalid required fields
+        - Defaults optional fields gracefully
+        - Warns but accepts extreme multiplier values
+
+    See Also:
+        - volume_utils.validate_trigger: Validation function
+        - get_active_volume_triggers: Retrieve persisted triggers
     """
+    # CRITICAL: Use relative import (we're inside mcp_server/)
+    from volume_utils import validate_trigger
+
     logger.info(f"save_volume_triggers: creator_id={creator_id}, triggers={len(triggers)}")
-    try:
-        # Get actual creator_id
-        creator = db_query(
-            "SELECT creator_id FROM creators WHERE creator_id = ? OR page_name = ? LIMIT 1",
-            (creator_id, creator_id)
-        )
-        if not creator:
-            return {"error": f"Creator not found: {creator_id}", "success": False}
 
-        creator_pk = creator[0]['creator_id']
-        saved = 0
-
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            for trigger in triggers:
-                cursor.execute("""
-                    INSERT OR REPLACE INTO volume_triggers (
-                        creator_id, content_type, trigger_type,
-                        adjustment_value, confidence, reason, expires_at,
-                        created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
-                """, (
-                    creator_pk,
-                    trigger.get('content_type'),
-                    trigger.get('trigger_type'),
-                    trigger.get('adjustment_multiplier', 1.0),
-                    trigger.get('confidence', 'moderate'),
-                    trigger.get('reason', ''),
-                    trigger.get('expires_at')
-                ))
-                saved += 1
-            conn.commit()
-
-        logger.info(f"Triggers saved: {saved}")
-
+    if not triggers:
         return {
             "success": True,
-            "triggers_saved": saved,
-            "creator_id": creator_id
+            "triggers_saved": 0,
+            "creator_id": creator_id,
+            "message": "No triggers to save"
         }
+
+    # Validate creator exists
+    try:
+        with get_db_connection() as conn:
+            creator_row = conn.execute("""
+                SELECT creator_id FROM creators
+                WHERE creator_id = ? OR page_name = ?
+                LIMIT 1
+            """, (creator_id, creator_id)).fetchone()
+
+            if not creator_row:
+                return {
+                    "success": False,
+                    "error": f"Creator not found: {creator_id}",
+                    "error_code": "CREATOR_NOT_FOUND",
+                    "creator_id": creator_id
+                }
+
+            creator_pk = creator_row[0]
+
+            # Validate all triggers BEFORE any DB writes (atomic batch)
+            validated = []
+            validation_errors = []
+            all_warnings = []
+
+            for i, trigger in enumerate(triggers):
+                is_valid, result = validate_trigger(trigger, i)
+                if is_valid:
+                    validated.append(result)
+                    if result.get("_warnings"):
+                        all_warnings.extend(result["_warnings"])
+                else:
+                    validation_errors.append(result)
+
+            # Reject entire batch if ANY trigger invalid
+            if validation_errors:
+                return {
+                    "success": False,
+                    "error": "Validation failed",
+                    "error_code": "VALIDATION_ERROR",
+                    "validation_errors": validation_errors,
+                    "triggers_rejected": len(validation_errors),
+                    "triggers_valid": len(validated),
+                    "creator_id": creator_id
+                }
+
+            # Persist validated triggers
+            saved = 0
+            for t in validated:
+                # Remove internal fields
+                t.pop("_warnings", None)
+
+                conn.execute("""
+                    INSERT OR REPLACE INTO volume_triggers (
+                        creator_id,
+                        content_type,
+                        trigger_type,
+                        adjustment_multiplier,
+                        confidence,
+                        reason,
+                        expires_at,
+                        detected_at,
+                        is_active,
+                        metrics_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), 1, ?)
+                """, (
+                    creator_pk,
+                    t["content_type"],
+                    t["trigger_type"],
+                    t["adjustment_multiplier"],
+                    t["confidence"],
+                    t["reason"],
+                    t["expires_at"],
+                    json.dumps(t["metrics_json"]) if t["metrics_json"] else None
+                ))
+                saved += 1
+
+            conn.commit()
+
+            return {
+                "success": True,
+                "triggers_saved": saved,
+                "creator_id": creator_id,
+                "creator_id_resolved": creator_pk,
+                "warnings": all_warnings if all_warnings else None
+            }
 
     except Exception as e:
         logger.error(f"save_volume_triggers error: {e}")
-        return {"error": str(e), "success": False}
+        return {
+            "success": False,
+            "error": f"Database error: {str(e)}",
+            "error_code": "DATABASE_ERROR",
+            "creator_id": creator_id
+        }
 
 
 # ============================================================

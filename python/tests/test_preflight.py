@@ -89,58 +89,62 @@ class TestHealthDetection:
 
 
 class TestTriggerDetection:
-    """5 trigger types from DOMAIN_KNOWLEDGE.md Section 8."""
+    """5 trigger types from DOMAIN_KNOWLEDGE.md Section 8.
+
+    v2.0 UPDATE: Tests now use rankings_data (content_type_rankings value)
+    directly instead of raw dict. Detection is conversion-first.
+    """
 
     @pytest.fixture
     def engine(self):
         return PreflightEngine(MockMCPClient())
 
     def test_high_performer_trigger(self, engine):
-        """RPS > $200 AND conversion > 6% -> HIGH_PERFORMER +20%."""
-        raw = {"content_type_rankings": {"content_types": [
-            {"type_name": "lingerie", "rps": 250, "conversion_rate": 7.0, "sends_last_30d": 15}
-        ]}}
-        triggers = engine._detect_triggers(raw)
+        """Conversion >= 6% -> HIGH_PERFORMER +20%."""
+        rankings_data = {"content_types": [
+            {"type_name": "lingerie", "conversion_rate": 7.0, "sends_last_30d": 15}
+        ]}
+        triggers = engine._detect_triggers(rankings_data)
         hp = [t for t in triggers if t["trigger_type"] == "HIGH_PERFORMER"]
         assert len(hp) == 1
         assert hp[0]["adjustment_multiplier"] == 1.20
 
     def test_trending_up_trigger(self, engine):
-        """WoW RPS +15% -> TRENDING_UP +10%."""
-        raw = {"content_type_rankings": {"content_types": [
-            {"type_name": "lingerie", "rps": 100, "conversion_rate": 4.0, "wow_rps_change": 20}
-        ]}}
-        triggers = engine._detect_triggers(raw)
+        """WoW revenue +15% -> TRENDING_UP +10%."""
+        rankings_data = {"content_types": [
+            {"type_name": "lingerie", "conversion_rate": 4.0, "wow_rps_change": 20, "sends_last_30d": 15}
+        ]}
+        triggers = engine._detect_triggers(rankings_data)
         tu = [t for t in triggers if t["trigger_type"] == "TRENDING_UP"]
         assert len(tu) == 1
         assert tu[0]["adjustment_multiplier"] == 1.10
 
     def test_emerging_winner_trigger(self, engine):
-        """RPS > $150 AND <3 uses/30d -> EMERGING_WINNER +30%."""
-        raw = {"content_type_rankings": {"content_types": [
-            {"type_name": "lingerie", "rps": 180, "conversion_rate": 4.0, "sends_last_30d": 2}
-        ]}}
-        triggers = engine._detect_triggers(raw)
+        """Conversion >= 5% AND <3 uses/30d -> EMERGING_WINNER +30%."""
+        rankings_data = {"content_types": [
+            {"type_name": "lingerie", "conversion_rate": 5.5, "sends_last_30d": 2}
+        ]}
+        triggers = engine._detect_triggers(rankings_data)
         ew = [t for t in triggers if t["trigger_type"] == "EMERGING_WINNER"]
         assert len(ew) == 1
         assert ew[0]["adjustment_multiplier"] == 1.30
 
     def test_saturating_trigger(self, engine):
-        """Declining RPS 3+ days -> SATURATING -15%."""
-        raw = {"content_type_rankings": {"content_types": [
-            {"type_name": "lingerie", "rps": 100, "conversion_rate": 4.0, "declining_rps_days": 4}
-        ]}}
-        triggers = engine._detect_triggers(raw)
+        """Declining 3+ days -> SATURATING -15%."""
+        rankings_data = {"content_types": [
+            {"type_name": "lingerie", "conversion_rate": 4.0, "declining_rps_days": 4, "sends_last_30d": 15}
+        ]}
+        triggers = engine._detect_triggers(rankings_data)
         sat = [t for t in triggers if t["trigger_type"] == "SATURATING"]
         assert len(sat) == 1
         assert sat[0]["adjustment_multiplier"] == 0.85
 
     def test_audience_fatigue_trigger(self, engine):
-        """Open rate -10%/7d -> AUDIENCE_FATIGUE -25%."""
-        raw = {"content_type_rankings": {"content_types": [
-            {"type_name": "lingerie", "rps": 100, "conversion_rate": 4.0, "open_rate_7d_change": -15}
-        ]}}
-        triggers = engine._detect_triggers(raw)
+        """Open rate <= -10%/7d -> AUDIENCE_FATIGUE -25%."""
+        rankings_data = {"content_types": [
+            {"type_name": "lingerie", "conversion_rate": 4.0, "open_rate_7d_change": -15, "sends_last_30d": 15}
+        ]}
+        triggers = engine._detect_triggers(rankings_data)
         af = [t for t in triggers if t["trigger_type"] == "AUDIENCE_FATIGUE"]
         assert len(af) == 1
         assert af[0]["adjustment_multiplier"] == 0.75
@@ -313,3 +317,174 @@ class TestCanonicalTierUsage:
         assert expected_holidays.issubset(HOLIDAYS), (
             f"Missing holidays: {expected_holidays - HOLIDAYS}"
         )
+
+
+# =============================================================================
+# TRIGGER INTEGRATION TESTS (Added for v2.0 refactoring)
+# =============================================================================
+
+import sys
+from pathlib import Path
+from unittest.mock import MagicMock, AsyncMock
+
+# Add mcp_server to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent.parent / "mcp_server"))
+
+
+class TestPreflightTriggerIntegration:
+    """Test trigger flow through preflight."""
+
+    @pytest.fixture
+    def mock_mcp(self):
+        """Create mock MCP client."""
+        mock = MagicMock()
+        mock.get_creator_profile = AsyncMock(return_value={
+            "creator": {"creator_id": "test", "is_active": True, "page_type": "paid"},
+            "allowed_content_types": {},
+            "content_type_rankings": {"content_types": []},
+            "volume_assignment": {"tier": "STANDARD"},
+            "analytics_summary": {},
+            "persona": {},
+            "metadata": {}
+        })
+        mock.get_active_volume_triggers = AsyncMock(return_value={
+            "triggers": [], "count": 0
+        })
+        mock.get_performance_trends = AsyncMock(return_value={})
+        mock.get_volume_config = AsyncMock(return_value={"tier": "STANDARD"})
+        return mock
+
+    @pytest.mark.asyncio
+    async def test_db_and_runtime_triggers_merged(self, mock_mcp):
+        """Verify DB + runtime triggers are combined and deduplicated."""
+        mock_mcp.get_active_volume_triggers.return_value = {
+            "triggers": [{"content_type": "lingerie", "trigger_type": "HIGH_PERFORMER", "adjustment_multiplier": 1.2}],
+            "count": 1
+        }
+        mock_mcp.get_creator_profile.return_value["content_type_rankings"] = {
+            "content_types": [
+                {"type_name": "lingerie", "conversion_rate": 8.0, "sends_last_30d": 15},  # Duplicate
+                {"type_name": "bikini", "conversion_rate": 7.5, "sends_last_30d": 12}    # New
+            ]
+        }
+
+        engine = PreflightEngine(mock_mcp)
+        raw = await engine._fetch_all("test", "2026-01-06")
+
+        triggers = raw["active_triggers"]
+        content_types = {t["content_type"] for t in triggers}
+
+        # lingerie from DB only (deduplicated)
+        # bikini from runtime (HIGH_PERFORMER with 7.5% conversion)
+        assert "lingerie" in content_types
+        assert "bikini" in content_types
+        # Only one lingerie trigger (not duplicated)
+        lingerie_triggers = [t for t in triggers if t["content_type"] == "lingerie"]
+        assert len(lingerie_triggers) == 1
+        assert lingerie_triggers[0]["source"] == "database"
+
+    @pytest.mark.asyncio
+    async def test_degraded_mode_on_trigger_failure(self, mock_mcp):
+        """Test graceful degradation when DB triggers fail."""
+        mock_mcp.get_active_volume_triggers.side_effect = Exception("Connection timeout")
+        mock_mcp.get_creator_profile.return_value["content_type_rankings"] = {
+            "content_types": [{"type_name": "bikini", "conversion_rate": 7.0, "sends_last_30d": 15}]
+        }
+
+        engine = PreflightEngine(mock_mcp)
+        raw = await engine._fetch_all("test", "2026-01-06")
+
+        assert raw["_triggers_metadata"]["degraded"] == True
+        assert raw["_triggers_metadata"]["db_source_available"] == False
+        assert raw["_triggers_metadata"]["runtime_detection_used"] == True
+        # Still has runtime triggers
+        assert len(raw["active_triggers"]) > 0
+
+    @pytest.mark.asyncio
+    async def test_performance_trends_still_fetched(self, mock_mcp):
+        """Verify performance_trends is still in response."""
+        mock_mcp.get_performance_trends.return_value = {
+            "consecutive_decline_weeks": 0,
+            "saturation_score": 45
+        }
+
+        engine = PreflightEngine(mock_mcp)
+        raw = await engine._fetch_all("test", "2026-01-06")
+
+        assert "performance_trends" in raw
+        assert raw["performance_trends"]["saturation_score"] == 45
+
+    @pytest.mark.asyncio
+    async def test_merge_does_not_mutate_input(self, mock_mcp):
+        """Verify _merge_triggers doesn't mutate input lists."""
+        db_triggers = [{"content_type": "x", "trigger_type": "HIGH_PERFORMER", "adjustment_multiplier": 1.2}]
+        runtime_triggers = [{"content_type": "y", "trigger_type": "TRENDING_UP", "adjustment_multiplier": 1.1}]
+
+        # Store original state
+        db_original = [dict(t) for t in db_triggers]
+        runtime_original = [dict(t) for t in runtime_triggers]
+
+        engine = PreflightEngine(mock_mcp)
+        merged = engine._merge_triggers(db_triggers, runtime_triggers)
+
+        # Verify originals unchanged
+        assert db_triggers == db_original
+        assert runtime_triggers == runtime_original
+        # Verify merged has source tags
+        assert all("source" in t for t in merged)
+
+
+class TestDetectTriggersWithConstants:
+    """Test _detect_triggers uses volume_utils constants."""
+
+    @pytest.fixture
+    def mock_mcp(self):
+        mock = MagicMock()
+        return mock
+
+    def test_uses_trigger_thresholds(self, mock_mcp):
+        """Verify detection uses TRIGGER_THRESHOLDS constants."""
+        from mcp_server.volume_utils import TRIGGER_THRESHOLDS
+
+        engine = PreflightEngine(mock_mcp)
+
+        # Test HIGH_PERFORMER threshold
+        rankings = {
+            "content_types": [{
+                "type_name": "test",
+                "conversion_rate": TRIGGER_THRESHOLDS["HIGH_PERFORMER"]["min_conversion"],
+                "sends_last_30d": 15
+            }]
+        }
+        triggers = engine._detect_triggers(rankings)
+
+        assert len(triggers) == 1
+        assert triggers[0]["trigger_type"] == "HIGH_PERFORMER"
+        assert triggers[0]["adjustment_multiplier"] == TRIGGER_THRESHOLDS["HIGH_PERFORMER"]["multiplier"]
+
+    def test_uses_confidence_thresholds(self, mock_mcp):
+        """Verify confidence uses CONFIDENCE_THRESHOLDS constants."""
+        from mcp_server.volume_utils import CONFIDENCE_THRESHOLDS
+
+        engine = PreflightEngine(mock_mcp)
+
+        # High confidence (> 10 sends)
+        rankings = {
+            "content_types": [{
+                "type_name": "test",
+                "conversion_rate": 7.0,
+                "sends_last_30d": CONFIDENCE_THRESHOLDS["high"] + 1
+            }]
+        }
+        triggers = engine._detect_triggers(rankings)
+        assert triggers[0]["confidence"] == "high"
+
+        # Moderate confidence (5-10 sends)
+        rankings["content_types"][0]["sends_last_30d"] = CONFIDENCE_THRESHOLDS["moderate"]
+        triggers = engine._detect_triggers(rankings)
+        assert triggers[0]["confidence"] == "moderate"
+
+        # Low confidence (< 5 sends)
+        rankings["content_types"][0]["sends_last_30d"] = CONFIDENCE_THRESHOLDS["moderate"] - 1
+        triggers = engine._detect_triggers(rankings)
+        assert triggers[0]["confidence"] == "low"

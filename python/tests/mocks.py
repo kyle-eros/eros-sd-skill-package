@@ -271,7 +271,7 @@ class MockMCPClient:
 
     async def get_active_volume_triggers(self, creator_id: str) -> dict:
         self._log("get_active_volume_triggers")
-        return []
+        return {"triggers": [], "count": 0}
 
     async def get_performance_trends(self, creator_id: str, period: str) -> dict:
         self._log("get_performance_trends")

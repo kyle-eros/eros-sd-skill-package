@@ -1,6 +1,6 @@
 """EROS Preflight Engine v1.0 - Deterministic context generation."""
 from __future__ import annotations
-import asyncio, hashlib, math, random
+import asyncio, hashlib, logging, math, random
 from calendar import monthrange
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -16,11 +16,19 @@ from mcp_server.volume_utils import (
     HOLIDAYS,
     BUMP_MULT,
     DAY_NAMES,
+    # Trigger detection constants (v2.0)
+    TRIGGER_THRESHOLDS,
+    TRIGGER_DEFAULT_TTL_DAYS,
+    CONFIDENCE_THRESHOLDS,
+    TRIGGER_MULT_MIN,
+    TRIGGER_MULT_MAX,
     # Utility functions also available but not replacing local methods yet
     # to preserve existing behavior during refactoring:
     # get_tier, get_tier_ranges, calc_calendar_boost, calc_bump_multiplier,
     # calc_health_status
 )
+
+logger = logging.getLogger("eros.preflight")
 
 @dataclass(frozen=True, slots=True)
 class CreatorContext:
@@ -59,7 +67,12 @@ class MCPClient(Protocol):
     async def get_persona_profile(self, creator_id: str) -> dict: ...
 
     # Schedule tools (5)
-    async def get_volume_config(self, creator_id: str, week_start: str) -> dict: ...
+    async def get_volume_config(
+        self,
+        creator_id: str,
+        week_start: str,
+        trigger_overrides: list[dict] | None = None
+    ) -> dict: ...
     async def get_active_volume_triggers(self, creator_id: str) -> dict: ...
     async def get_performance_trends(self, creator_id: str, period: str = "14d") -> dict: ...
     async def save_schedule(self, creator_id: str, week_start: str, items: list, validation_certificate: dict = None) -> dict: ...
@@ -87,7 +100,7 @@ class PreflightEngine:
         if not profile.get("is_active"): raise ValueError(f"Creator {creator_id} not active")
 
         health = self._calc_health(raw)
-        triggers = list(raw.get("active_triggers", [])) + self._detect_triggers(raw)
+        triggers = raw.get("active_triggers", [])  # Already merged in _fetch_all
         volume = self._calc_volume(raw, health, triggers, week_start)
         timing = self._gen_timing(volume, week_start)
 
@@ -103,22 +116,14 @@ class PreflightEngine:
             mcp_calls_made=3)  # v1.5.0: Reduced from 4 via persona bundling
 
     async def _fetch_all(self, cid: str, ws: str) -> dict:
-        """Fetch all creator data with optimized bundled call.
+        """Fetch all creator data with graceful degradation.
 
-        Uses bundled get_creator_profile for efficiency (saves 5 MCP calls):
-        - analytics, volume, content_rankings, vault, and persona all bundled.
-
-        CRITICAL FIX (v1.3.0): Vault data now comes directly from vault_matrix
-        instead of being derived from top_content_types. This ensures we catch
-        vault content that may not have historical performance data.
-
-        CRITICAL FIX (v1.4.0): Now uses pre-computed avoid_types and top_types
-        from bundled response instead of re-computing them.
-
-        OPTIMIZATION (v1.5.0): Persona now bundled into get_creator_profile,
-        reducing total MCP calls from 4 to 3.
+        v2.0 CHANGES:
+        - Passes DB triggers to get_volume_config via trigger_overrides
+          to eliminate duplicate database query
+        - Merges DB triggers with runtime-detected triggers
+        - Handles trigger fetch failures gracefully
         """
-
         # Use bundled get_creator_profile for efficiency (saves 5 MCP calls)
         profile_bundle = await self.mcp.get_creator_profile(
             cid,
@@ -126,41 +131,105 @@ class PreflightEngine:
             include_volume=True,
             include_content_rankings=True,
             include_vault=True,
-            include_persona=True,  # v1.5.0: Persona now bundled
+            include_persona=True,
         )
 
-        # Parallel fetch remaining data not in bundle (only 2 calls now)
-        remaining_results = await asyncio.gather(
+        # Parallel fetch remaining data - triggers, trends, and rankings for detection
+        triggers_result, trends_result = await asyncio.gather(
             self.mcp.get_active_volume_triggers(cid),
             self.mcp.get_performance_trends(cid, "14d"),
             return_exceptions=True
         )
 
+        # Handle triggers failure with degradation
+        db_triggers = []
+        triggers_degraded = False
+        triggers_error = None
+
+        if isinstance(triggers_result, Exception):
+            triggers_error = str(triggers_result)
+            logger.error(f"get_active_volume_triggers failed for {cid}: {triggers_error}")
+            triggers_degraded = True
+        else:
+            db_triggers = triggers_result.get("triggers", [])
+
         # Extract vault data (HARD GATE - from vault_matrix)
         vault_data = profile_bundle.get("allowed_content_types", {})
 
-        # Extract rankings data (HARD GATE - from top_content_types with analysis_date filter)
-        # NEW: Use new structure if available, fall back to legacy
+        # Extract rankings data for runtime detection
         rankings_data = profile_bundle.get("content_type_rankings", {})
         if not rankings_data:
-            # Legacy fallback
             rankings_data = {
                 "rankings": profile_bundle.get("top_content_types", []),
                 "avoid_types": profile_bundle.get("avoid_types", []),
                 "top_types": profile_bundle.get("top_types", [])
             }
 
+        # Runtime detection from rankings
+        runtime_triggers = self._detect_triggers(rankings_data)
+
+        # Merge and deduplicate DB + runtime triggers (DB takes precedence)
+        merged_triggers = self._merge_triggers(db_triggers, runtime_triggers)
+
+        # Handle trends failure gracefully
+        trends_data = {}
+        if isinstance(trends_result, Exception):
+            logger.warning(f"get_performance_trends failed for {cid}: {trends_result}")
+        else:
+            trends_data = trends_result
+
         return {
             "creator_profile": profile_bundle.get("creator", {}),
             "volume_config": profile_bundle.get("volume_assignment", {}),
             "allowed_content_types": vault_data,
-            "content_type_rankings": rankings_data,  # Now includes pre-computed lists
+            "content_type_rankings": rankings_data,
             "analytics_summary": profile_bundle.get("analytics_summary", {}),
-            "persona": profile_bundle.get("persona", {}),  # v1.5.0: Now from bundle
-            "active_triggers": remaining_results[0] if not isinstance(remaining_results[0], Exception) else [],
-            "performance_trends": remaining_results[1] if not isinstance(remaining_results[1], Exception) else {},
-            "_bundle_metadata": profile_bundle.get("metadata", {})
+            "persona": profile_bundle.get("persona", {}),
+            "active_triggers": merged_triggers,  # Now merged list, not raw response
+            "performance_trends": trends_data,
+            "_bundle_metadata": profile_bundle.get("metadata", {}),
+            "_triggers_metadata": {
+                "db_source_available": not isinstance(triggers_result, Exception),
+                "runtime_detection_used": len(runtime_triggers) > 0,
+                "degraded": triggers_degraded,
+                "error": triggers_error,
+                "db_count": len(db_triggers),
+                "runtime_count": len(runtime_triggers),
+                "merged_count": len(merged_triggers)
+            }
         }
+
+    def _merge_triggers(self, db_triggers: list, runtime_triggers: list) -> list:
+        """Merge DB and runtime triggers, preferring DB for duplicates.
+
+        Deduplicates by (content_type, trigger_type).
+        DB triggers take precedence (more reliable, persisted).
+
+        IMPORTANT: Creates shallow copies to avoid mutating input data.
+        """
+        seen = set()
+        merged = []
+
+        # DB triggers first (take precedence) - create copies to avoid mutation
+        for t in db_triggers:
+            key = (t.get("content_type"), t.get("trigger_type"))
+            if key not in seen:
+                trigger_copy = {**t}  # Shallow copy
+                if "source" not in trigger_copy:
+                    trigger_copy["source"] = "database"
+                merged.append(trigger_copy)
+                seen.add(key)
+
+        # Add runtime triggers that don't duplicate DB - create copies
+        for t in runtime_triggers:
+            key = (t.get("content_type"), t.get("trigger_type"))
+            if key not in seen:
+                trigger_copy = {**t}  # Shallow copy
+                trigger_copy["source"] = "runtime"
+                merged.append(trigger_copy)
+                seen.add(key)
+
+        return merged
 
     def _calc_health(self, raw: dict) -> dict:
         """Death spiral detection from DOMAIN_KNOWLEDGE.md Section 7."""
@@ -177,45 +246,98 @@ class PreflightEngine:
                 "consecutive_decline_weeks": decline, "saturation_score": sat,
                 "opportunity_score": opp, "volume_adjustment": adj}
 
-    def _detect_triggers(self, raw: dict) -> list[dict]:
-        """5 trigger types from DOMAIN_KNOWLEDGE.md Section 8."""
-        triggers = []; exp = (datetime.now().date() + timedelta(days=7)).isoformat()
-        for ct in raw.get("content_type_rankings", {}).get("content_types", []):
-            name = ct.get("type_name", ct.get("content_type", ""))
-            rps = ct.get("rps", ct.get("revenue_per_send", 0))
-            conv = ct.get("conversion_rate", 0)
-            uses = ct.get("sends_last_30d", ct.get("send_count", 10))
-            wow = ct.get("wow_rps_change", 0)
-            orc = ct.get("open_rate_7d_change", 0)
-            dec = ct.get("declining_rps_days", 0)
-            n = ct.get("sends_analyzed", uses)
-            conf = "high" if n > 10 else "moderate" if n >= 5 else "low"
+    def _detect_triggers(self, rankings_data: dict) -> list[dict]:
+        """Detect triggers from content type rankings using volume_utils thresholds.
 
-            # HIGH_PERFORMER: RPS > $200 AND conversion > 6% → +20%
-            if rps > 200 and conv > 6:
-                triggers.append({"content_type": name, "trigger_type": "HIGH_PERFORMER",
-                    "adjustment_multiplier": 1.20, "confidence": conf,
-                    "reason": f"RPS ${rps:.0f}, conv {conv:.1f}%", "expires_at": exp})
-            # EMERGING_WINNER: RPS > $150 AND <3 uses/30d → +30%
-            elif rps > 150 and uses < 3:
-                triggers.append({"content_type": name, "trigger_type": "EMERGING_WINNER",
-                    "adjustment_multiplier": 1.30, "confidence": conf,
-                    "reason": f"RPS ${rps:.0f}, {uses} uses/30d", "expires_at": exp})
-            # TRENDING_UP: WoW RPS +15% → +10%
-            elif wow >= 15:
-                triggers.append({"content_type": name, "trigger_type": "TRENDING_UP",
-                    "adjustment_multiplier": 1.10, "confidence": conf,
-                    "reason": f"WoW RPS +{wow:.0f}%", "expires_at": exp})
-            # SATURATING: Declining RPS 3+ days → -15%
-            elif dec >= 3:
-                triggers.append({"content_type": name, "trigger_type": "SATURATING",
-                    "adjustment_multiplier": 0.85, "confidence": "moderate",
-                    "reason": f"Declining {dec} days", "expires_at": exp})
-            # AUDIENCE_FATIGUE: Open rate -10%/7d → -25%
-            elif orc <= -10:
-                triggers.append({"content_type": name, "trigger_type": "AUDIENCE_FATIGUE",
-                    "adjustment_multiplier": 0.75, "confidence": "moderate",
-                    "reason": f"Open rate {orc:.0f}%/7d", "expires_at": exp})
+        v2.0 CHANGE: Uses TRIGGER_THRESHOLDS from volume_utils (single source of truth).
+        Detection is conversion-first (scale-independent).
+
+        Args:
+            rankings_data: Response from get_content_type_rankings or bundled data
+
+        Returns:
+            List of detected trigger dicts
+        """
+        triggers = []
+
+        # Handle both response formats
+        content_types = rankings_data.get("rankings", rankings_data.get("content_types", []))
+
+        expires = (datetime.now() + timedelta(days=TRIGGER_DEFAULT_TTL_DAYS)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        for ct in content_types:
+            name = ct.get("type_name", ct.get("content_type", ""))
+            if not name:
+                continue
+
+            conv = ct.get("conversion_rate", 0) or 0
+            uses = ct.get("sends_last_30d", ct.get("send_count", 10)) or 10
+            wow = ct.get("wow_rps_change", ct.get("wow_revenue_change", 0)) or 0
+            orc = ct.get("open_rate_7d_change", 0) or 0
+            dec = ct.get("declining_rps_days", ct.get("declining_days", 0)) or 0
+
+            # Determine confidence based on send count
+            if uses > CONFIDENCE_THRESHOLDS["high"]:
+                conf = "high"
+            elif uses >= CONFIDENCE_THRESHOLDS["moderate"]:
+                conf = "moderate"
+            else:
+                conf = "low"
+
+            # Scale-aware detection (conversion-first)
+            th = TRIGGER_THRESHOLDS
+
+            if conv >= th["HIGH_PERFORMER"]["min_conversion"]:
+                triggers.append({
+                    "content_type": name,
+                    "trigger_type": "HIGH_PERFORMER",
+                    "adjustment_multiplier": th["HIGH_PERFORMER"]["multiplier"],
+                    "confidence": conf,
+                    "reason": f"Conversion {conv:.1f}%",
+                    "expires_at": expires,
+                    "metrics_json": {"detected": {"conversion_rate": conv, "sends": uses}}
+                })
+            elif conv >= th["EMERGING_WINNER"]["min_conversion"] and uses < th["EMERGING_WINNER"]["max_uses_30d"]:
+                triggers.append({
+                    "content_type": name,
+                    "trigger_type": "EMERGING_WINNER",
+                    "adjustment_multiplier": th["EMERGING_WINNER"]["multiplier"],
+                    "confidence": conf,
+                    "reason": f"Conversion {conv:.1f}%, {uses} uses/30d",
+                    "expires_at": expires,
+                    "metrics_json": {"detected": {"conversion_rate": conv, "uses_30d": uses}}
+                })
+            elif wow >= th["TRENDING_UP"]["min_wow_revenue_change"]:
+                triggers.append({
+                    "content_type": name,
+                    "trigger_type": "TRENDING_UP",
+                    "adjustment_multiplier": th["TRENDING_UP"]["multiplier"],
+                    "confidence": conf,
+                    "reason": f"WoW revenue +{wow:.0f}%",
+                    "expires_at": expires,
+                    "metrics_json": {"detected": {"wow_change": wow}}
+                })
+            elif dec >= th["SATURATING"]["min_decline_days"]:
+                triggers.append({
+                    "content_type": name,
+                    "trigger_type": "SATURATING",
+                    "adjustment_multiplier": th["SATURATING"]["multiplier"],
+                    "confidence": "moderate",
+                    "reason": f"Declining {dec} days",
+                    "expires_at": expires,
+                    "metrics_json": {"detected": {"decline_days": dec}}
+                })
+            elif orc <= th["AUDIENCE_FATIGUE"]["max_open_rate_change"]:
+                triggers.append({
+                    "content_type": name,
+                    "trigger_type": "AUDIENCE_FATIGUE",
+                    "adjustment_multiplier": th["AUDIENCE_FATIGUE"]["multiplier"],
+                    "confidence": "moderate",
+                    "reason": f"Open rate {orc:.0f}%/7d",
+                    "expires_at": expires,
+                    "metrics_json": {"detected": {"open_rate_7d_change": orc}}
+                })
+
         return triggers
 
     def _calc_volume(self, raw: dict, health: dict, triggers: list, week_start: str) -> dict:

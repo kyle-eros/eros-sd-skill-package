@@ -178,9 +178,17 @@ class ProductionMCPClient:
     # ============================================================
 
     @with_retry()
-    async def get_volume_config(self, creator_id: str, week_start: str) -> dict:
+    async def get_volume_config(
+        self,
+        creator_id: str,
+        week_start: str,
+        trigger_overrides: list[dict] | None = None
+    ) -> dict:
         """MCP: mcp__eros-db__get_volume_config"""
-        return await self._call("get_volume_config", creator_id=creator_id, week_start=week_start)
+        kwargs = {"creator_id": creator_id, "week_start": week_start}
+        if trigger_overrides is not None:
+            kwargs["trigger_overrides"] = trigger_overrides
+        return await self._call("get_volume_config", **kwargs)
 
     @with_retry()
     async def get_active_volume_triggers(self, creator_id: str) -> dict:
