@@ -273,12 +273,66 @@ class MockMCPClient:
         self._log("get_active_volume_triggers")
         return {"triggers": [], "count": 0}
 
-    async def get_performance_trends(self, creator_id: str, period: str) -> dict:
+    async def get_performance_trends(self, creator_id: str, period: str = "14d") -> dict:
+        """Mock get_performance_trends matching new contract."""
         self._log("get_performance_trends")
+
+        # Use config values for test control
+        saturation = self.config.saturation
+        decline_weeks = self.config.decline_weeks
+
+        # Calculate health status (matches volume_utils.calc_health_status logic)
+        if decline_weeks >= 4:
+            health_status = "DEATH_SPIRAL"
+            volume_adjustment = -1
+        elif decline_weeks >= 2:
+            health_status = "WARNING"
+            volume_adjustment = 0
+        else:
+            health_status = "HEALTHY"
+            volume_adjustment = 1 if saturation < 30 else 0
+
         return {
-            "saturation_score": self.config.saturation,
-            "opportunity_score": 100 - self.config.saturation,
-            "consecutive_decline_weeks": self.config.decline_weeks,
+            # Original fields (backwards compat)
+            "creator_id": creator_id,
+            "creator_id_resolved": creator_id,
+            "period": period,
+            "health_status": health_status,
+            "avg_rps": 15.50,
+            "avg_conversion": 4.2,
+            "avg_open_rate": 45.5,
+            "total_earnings": 1550.00,
+            "total_sends": 100,
+            "saturation_score": saturation,
+            "opportunity_score": 100 - saturation,
+            "date_range": {
+                "start": "2026-01-01T00:00:00Z",
+                "end": "2026-01-14T23:59:59Z"
+            },
+
+            # New fields from refactor
+            "consecutive_decline_weeks": decline_weeks,
+            "volume_adjustment": volume_adjustment,
+            "revenue_trend_pct": 8.5,
+            "engagement_trend_pct": 12.0,
+            "trend_period": "wow",
+            "data_confidence": "high",
+            "insufficient_data": False,
+
+            # Metadata block
+            "metadata": {
+                "fetched_at": datetime.now().isoformat() + "Z",
+                "trends_hash": "sha256:mock_hash_1234",
+                "hash_inputs": [f"creator:{creator_id}", f"period:{period}"],
+                "query_ms": 25.5,
+                "data_age_days": 1,
+                "is_stale": False,
+                "has_period_data": True,
+                "sends_in_period": 100,
+                "period_days": 14,
+                "expected_sends": 28,
+                "staleness_threshold_days": 14
+            }
         }
 
     async def save_schedule(self, creator_id: str, week_start: str,

@@ -321,6 +321,37 @@ def calc_health_status(
     }
 
 
+def calc_consecutive_decline_weeks(weekly_earnings: list[dict]) -> int:
+    """
+    Calculate consecutive weeks of declining revenue from most recent week.
+
+    Args:
+        weekly_earnings: List of dicts with 'week' and 'weekly_earnings' keys,
+                        ordered DESC (most recent first)
+
+    Returns:
+        Count of consecutive declining weeks (0 if no decline or insufficient data)
+
+    Example:
+        >>> data = [{"week": "2026-02", "weekly_earnings": 900},
+        ...         {"week": "2026-01", "weekly_earnings": 1000}]
+        >>> calc_consecutive_decline_weeks(data)
+        1
+    """
+    if len(weekly_earnings) < 2:
+        return 0
+
+    decline = 0
+    for i in range(len(weekly_earnings) - 1):
+        curr = weekly_earnings[i].get("weekly_earnings") or 0
+        prev = weekly_earnings[i + 1].get("weekly_earnings") or 0
+        if curr < prev:
+            decline += 1
+        else:
+            break  # Consecutive chain broken
+    return decline
+
+
 def compute_volume_config_hash(
     tier: str,
     trigger_multiplier: float,

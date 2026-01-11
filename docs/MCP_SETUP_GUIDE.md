@@ -1,7 +1,7 @@
 # EROS MCP Setup Guide
 
-**Version**: 1.6.0
-**Last Updated**: 2026-01-08
+**Version**: 2.0.0
+**Last Updated**: 2026-01-10
 **Server**: eros-db
 
 ## Overview
@@ -255,6 +255,80 @@ Canonical tier thresholds are defined in `mcp_server/volume_utils.py`. All consu
 (`get_volume_config`, `get_creator_profile`, `preflight.py`) import from this single
 source of truth, eliminating the risk of threshold drift between components.
 
+### get_performance_trends Enhancement (v2.0.0)
+
+**Purpose:** Returns performance trends for health and saturation detection.
+
+**MCP Name:** `mcp__eros-db__get_performance_trends`
+
+#### Parameters
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| creator_id | string | Yes | - | Creator identifier or page_name |
+| period | string | No | "14d" | Analysis period: "7d", "14d", or "30d" |
+
+#### Response Schema
+
+```json
+{
+  "creator_id": "string - input creator identifier",
+  "creator_id_resolved": "string - canonical creator_id from database",
+  "period": "string - analysis period used",
+  "health_status": "string - HEALTHY | WARNING | DEATH_SPIRAL",
+  "saturation_score": "int - 0-100, send density percentage",
+  "opportunity_score": "int - 0-100, volume increase headroom",
+  "consecutive_decline_weeks": "int - weeks of declining revenue",
+  "volume_adjustment": "int - -1, 0, or +1 recommended adjustment",
+  "avg_rps": "float - average revenue per send",
+  "avg_conversion": "float - conversion rate percentage",
+  "avg_open_rate": "float - open rate percentage",
+  "total_earnings": "float - total earnings in period",
+  "total_sends": "int - count of sends in period",
+  "revenue_trend_pct": "float|null - week-over-week revenue change",
+  "engagement_trend_pct": "float|null - week-over-week engagement change",
+  "trend_period": "string - comparison type (wow = week-over-week)",
+  "data_confidence": "string - high | moderate | low",
+  "insufficient_data": "bool - true if <10 sends in period",
+  "date_range": {
+    "start": "string - period start timestamp",
+    "end": "string - period end timestamp"
+  },
+  "metadata": {
+    "fetched_at": "string - ISO timestamp",
+    "trends_hash": "string - cache invalidation hash",
+    "hash_inputs": "array - values used in hash calculation",
+    "query_ms": "float - query execution time",
+    "data_age_days": "int|null - days since last data",
+    "is_stale": "bool - true if >14 days old",
+    "has_period_data": "bool - data exists in requested period",
+    "sends_in_period": "int - actual send count",
+    "period_days": "int - period length in days",
+    "expected_sends": "int - baseline expected sends",
+    "staleness_threshold_days": "int - staleness cutoff (14)"
+  }
+}
+```
+
+#### Health Status Logic
+
+- `HEALTHY`: 0-1 consecutive decline weeks
+- `WARNING`: 2-3 consecutive decline weeks
+- `DEATH_SPIRAL`: 4+ consecutive decline weeks
+
+#### Data Confidence Thresholds
+
+- `high`: sends >= 20 AND data_age_days <= 7
+- `moderate`: sends >= 10 OR data_age_days <= 14
+- `low`: sends < 10 AND data_age_days > 14
+
+#### Example
+
+```python
+result = get_performance_trends("alexia", "14d")
+# Returns performance metrics with health status and saturation analysis
+```
+
 ## Tool Usage by Phase
 
 ### Phase 1 - Preflight (3 tools - optimized)
@@ -440,4 +514,4 @@ Key tables:
 ---
 
 *EROS Schedule Generator MCP Documentation*
-*Server: eros-db | Tools: 15 | MCP Spec: 2025-11-25 | get_volume_config v1.6.0 (enhanced)*
+*Server: eros-db | Tools: 15 | MCP Spec: 2025-11-25 | get_performance_trends v2.0.0 (enhanced)*

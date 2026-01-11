@@ -27,6 +27,8 @@ import json
 import re
 import sqlite3
 import logging
+import hashlib
+import time
 from pathlib import Path
 from contextlib import contextmanager
 from datetime import datetime
@@ -34,8 +36,8 @@ from datetime import datetime
 from volume_utils import (
     TIERS, TIER_ORDER, PRIME_HOURS, DAY_NAMES,
     get_tier, get_tier_ranges, calc_calendar_boost, calc_weekend_boost,
-    calc_bump_multiplier, calc_health_status, compute_volume_config_hash,
-    get_week_dates, get_day_name
+    calc_bump_multiplier, calc_health_status, calc_consecutive_decline_weeks,
+    compute_volume_config_hash, get_week_dates, get_day_name
 )
 
 # Configure logging
@@ -1578,15 +1580,10 @@ def get_volume_config(
                     LIMIT 8
                 """, (creator_id_resolved,)).fetchall()
 
-                if len(weekly_rows) >= 2:
-                    decline = 0
-                    for i in range(len(weekly_rows) - 1):
-                        curr = weekly_rows[i]["weekly_earnings"] or 0
-                        prev = weekly_rows[i + 1]["weekly_earnings"] or 0
-                        if curr < prev:
-                            decline += 1
-                        else:
-                            break  # Consecutive decline broken
+                # Convert to expected format and use shared function
+                weekly_data = [{"week": row["week"], "weekly_earnings": row["weekly_earnings"]}
+                               for row in weekly_rows]
+                decline = calc_consecutive_decline_weeks(weekly_data)
 
         except Exception as e:
             logger.warning(f"Could not calculate health: {e}")
@@ -1966,31 +1963,37 @@ def get_performance_trends(creator_id: str, period: str = "14d") -> dict:
 
     Args:
         creator_id: Creator identifier
-        period: Analysis period (default "14d")
+        period: Analysis period ("7d", "14d", or "30d")
 
     Returns:
-        Performance metrics including saturation indicators
+        Performance metrics including saturation indicators, health status,
+        and volume adjustment recommendations.
     """
+    start_time = time.time()
     logger.info(f"get_performance_trends: creator_id={creator_id}, period={period}")
+
+    # Validate period parameter (BUG-004 fix)
+    valid_periods = {"7d", "14d", "30d"}
+    if period not in valid_periods:
+        return {
+            "error": f"Invalid period: {period}. Must be one of {valid_periods}",
+            "error_code": "INVALID_PERIOD",
+            "creator_id": creator_id
+        }
+    period_days = int(period.replace('d', ''))
+
     try:
-        # Parse period (default 14 days)
-        days = 14
-        if period.endswith('d'):
-            try:
-                days = int(period[:-1])
-            except ValueError:
-                days = 14
+        # Use resolve_creator_id helper for consistent creator resolution
+        resolved = resolve_creator_id(creator_id)
+        if not resolved.get("found"):
+            return {
+                "error": f"Creator not found: {creator_id}",
+                "error_code": "CREATOR_NOT_FOUND",
+                "creator_id": creator_id
+            }
+        creator_pk = resolved["creator_id"]
 
-        # Get creator_id if page_name provided
-        creator = db_query(
-            "SELECT creator_id FROM creators WHERE creator_id = ? OR page_name = ? LIMIT 1",
-            (creator_id, creator_id)
-        )
-        if not creator:
-            return {"error": f"Creator not found: {creator_id}"}
-
-        creator_pk = creator[0]['creator_id']
-
+        # Query performance metrics (BUG-003 fix: use sent_date not imported_at)
         metrics = db_query("""
             SELECT
                 CASE WHEN SUM(purchased_count) > 0
@@ -2004,50 +2007,205 @@ def get_performance_trends(creator_id: str, period: str = "14d") -> dict:
                      ELSE 0 END as avg_open_rate,
                 SUM(earnings) as total_earnings,
                 COUNT(*) as total_sends,
-                MIN(imported_at) as first_send,
-                MAX(imported_at) as last_send
+                MIN(sent_date) as first_send,
+                MAX(sent_date) as last_send
             FROM mass_messages
             WHERE creator_id = ?
-            AND imported_at >= date('now', ?)
-        """, (creator_pk, f'-{days} days'))
+            AND sent_date >= date('now', ?)
+        """, (creator_pk, f'-{period_days} days'))
 
-        if not metrics or not metrics[0].get('total_sends'):
+        # Handle empty/insufficient data case
+        sends_in_period = (metrics[0].get('total_sends') or 0) if metrics else 0
+        if not metrics or sends_in_period == 0:
+            logger.warning(f"get_performance_trends: insufficient data for {creator_id}, sends={sends_in_period}")
+            empty_hash = hashlib.sha256(f'empty:{creator_pk}'.encode()).hexdigest()[:16]
             return {
                 "creator_id": creator_id,
+                "creator_id_resolved": creator_pk,
                 "period": period,
-                "health_status": "UNKNOWN",
-                "message": "No performance data found",
-                "avg_rps": 0,
-                "total_sends": 0
+                "health_status": "HEALTHY",
+                "saturation_score": 50,
+                "opportunity_score": 50,
+                "consecutive_decline_weeks": 0,
+                "volume_adjustment": 0,
+                "avg_rps": 0.0,
+                "avg_conversion": 0.0,
+                "avg_open_rate": 0.0,
+                "total_earnings": 0.0,
+                "total_sends": 0,
+                "date_range": {"start": None, "end": None},
+                "revenue_trend_pct": None,
+                "engagement_trend_pct": None,
+                "trend_period": "wow",
+                "data_confidence": "low",
+                "insufficient_data": True,
+                "metadata": {
+                    "fetched_at": datetime.now().isoformat() + "Z",
+                    "trends_hash": f"sha256:{empty_hash}",
+                    "hash_inputs": [f"creator:{creator_pk}", "empty:true"],
+                    "query_ms": round((time.time() - start_time) * 1000, 2),
+                    "data_age_days": None,
+                    "is_stale": True,
+                    "has_period_data": False,
+                    "sends_in_period": 0,
+                    "period_days": period_days,
+                    "expected_sends": period_days * 2,
+                    "staleness_threshold_days": 14
+                }
             }
 
         m = dict(metrics[0])
 
-        # Determine health status based on trends
-        health_status = "HEALTHY"
-        saturation = 50
-        opportunity = 50
+        # Calculate saturation dynamically (BUG-001 fix)
+        expected_sends = period_days * 2  # 2 sends/day baseline
+        saturation_score = min(100, int((sends_in_period / expected_sends) * 100)) if expected_sends > 0 else 0
+        opportunity_score = 100 - saturation_score
+
+        # Query for weekly earnings (8 weeks for decline detection) (BUG-002 fix)
+        weekly_query = """
+            SELECT
+                strftime('%Y-%W', sent_date) as week,
+                SUM(earnings) as weekly_earnings,
+                SUM(COALESCE(viewed_count, 0)) as weekly_views
+            FROM mass_messages
+            WHERE creator_id = ?
+              AND sent_date >= date('now', '-56 days')
+            GROUP BY week
+            ORDER BY week DESC
+            LIMIT 8
+        """
+        weekly_rows = db_query(weekly_query, (creator_pk,))
+
+        # Convert query results to expected format for shared function
+        weekly_data = [{"week": row.get("week"), "weekly_earnings": row.get("weekly_earnings")}
+                       for row in (weekly_rows or [])]
+
+        # Use shared function for decline calculation
+        consecutive_decline_weeks = calc_consecutive_decline_weeks(weekly_data)
+
+        # Calculate health status using volume_utils (already imported)
+        health_result = calc_health_status(saturation_score, consecutive_decline_weeks)
+        health_status = health_result["status"]
+        volume_adjustment = health_result["volume_adjustment"]
+
+        # Get data age from metrics
+        last_sent_date = m.get('last_send') or m.get('last_sent_date')
+        if last_sent_date:
+            try:
+                if 'T' in str(last_sent_date):
+                    data_age_days = (datetime.now() - datetime.fromisoformat(str(last_sent_date).replace('Z', '+00:00').replace('+00:00', ''))).days
+                else:
+                    data_age_days = (datetime.now().date() - datetime.strptime(str(last_sent_date), '%Y-%m-%d').date()).days
+            except:
+                data_age_days = None
+        else:
+            data_age_days = None
+
+        # Data confidence based on sample size and age
+        if sends_in_period >= 20 and data_age_days is not None and data_age_days <= 7:
+            data_confidence = "high"
+        elif sends_in_period >= 10 or (data_age_days is not None and data_age_days <= 14):
+            data_confidence = "moderate"
+        else:
+            data_confidence = "low"
+
+        # Insufficient data flag
+        insufficient_data = sends_in_period < 10
+
+        # Calculate WoW trends from weekly data
+        if len(weekly_data) >= 2:
+            curr_rev = weekly_data[0].get("weekly_earnings") or 0
+            prev_rev = weekly_data[1].get("weekly_earnings") or 0
+            revenue_trend_pct = round(((curr_rev - prev_rev) / prev_rev * 100), 1) if prev_rev > 0 else None
+
+            # For engagement trend, use views from query
+            if weekly_rows and len(weekly_rows) >= 2:
+                curr_views = weekly_rows[0].get("weekly_views") or 0
+                prev_views = weekly_rows[1].get("weekly_views") or 0
+                engagement_trend_pct = round(((curr_views - prev_views) / prev_views * 100), 1) if prev_views > 0 else None
+            else:
+                engagement_trend_pct = None
+        else:
+            revenue_trend_pct = None
+            engagement_trend_pct = None
+
+        # Staleness flags
+        STALENESS_THRESHOLD_DAYS = 14
+        is_stale = data_age_days is None or data_age_days > STALENESS_THRESHOLD_DAYS
+        has_period_data = sends_in_period > 0
+
+        # Calculate hash for cache invalidation
+        hash_inputs = [
+            f"creator:{creator_pk}",
+            f"period:{period}",
+            f"saturation:{saturation_score}",
+            f"decline:{consecutive_decline_weeks}",
+            f"health:{health_status}",
+            f"sends:{sends_in_period}",
+            f"last_data:{last_sent_date or 'none'}"
+        ]
+        trends_hash = hashlib.sha256(
+            json.dumps(hash_inputs, sort_keys=True).encode()
+        ).hexdigest()[:16]
+
+        # Query timing
+        query_ms = round((time.time() - start_time) * 1000, 2)
+
+        # Build metadata block
+        metadata = {
+            "fetched_at": datetime.now().isoformat() + "Z",
+            "trends_hash": f"sha256:{trends_hash}",
+            "hash_inputs": hash_inputs,
+            "query_ms": query_ms,
+            "data_age_days": data_age_days,
+            "is_stale": is_stale,
+            "has_period_data": has_period_data,
+            "sends_in_period": sends_in_period,
+            "period_days": period_days,
+            "expected_sends": expected_sends,
+            "staleness_threshold_days": STALENESS_THRESHOLD_DAYS
+        }
 
         return {
+            # Existing fields (MUST KEEP for backwards compatibility)
             "creator_id": creator_id,
+            "creator_id_resolved": creator_pk,
             "period": period,
             "health_status": health_status,
             "avg_rps": round(m.get('avg_rps') or 0, 2),
-            "avg_conversion": round(m.get('avg_conversion') or 0, 3),
-            "avg_open_rate": round(m.get('avg_open_rate') or 0, 3),
+            "avg_conversion": round((m.get('avg_conversion') or 0) * 100, 1),  # Convert to percentage
+            "avg_open_rate": round((m.get('avg_open_rate') or 0) * 100, 1),    # Convert to percentage
             "total_earnings": round(m.get('total_earnings') or 0, 2),
-            "total_sends": m.get('total_sends') or 0,
-            "saturation_score": saturation,
-            "opportunity_score": opportunity,
+            "total_sends": sends_in_period,
+            "saturation_score": saturation_score,
+            "opportunity_score": opportunity_score,
             "date_range": {
                 "start": m.get('first_send'),
                 "end": m.get('last_send')
-            }
+            },
+
+            # New fields from Phase 1/2
+            "consecutive_decline_weeks": consecutive_decline_weeks,
+            "volume_adjustment": volume_adjustment,
+
+            # NEW: Enhanced fields from Phase 3
+            "revenue_trend_pct": revenue_trend_pct,
+            "engagement_trend_pct": engagement_trend_pct,
+            "trend_period": "wow",  # Documents comparison type
+            "data_confidence": data_confidence,
+            "insufficient_data": insufficient_data,
+
+            # NEW: Metadata block
+            "metadata": metadata
         }
 
     except Exception as e:
         logger.error(f"get_performance_trends error: {e}")
-        return {"error": str(e)}
+        return {
+            "error": str(e),
+            "error_code": "DATABASE_ERROR",
+            "creator_id": creator_id
+        }
 
 
 @mcp.tool()

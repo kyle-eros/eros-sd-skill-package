@@ -39,6 +39,7 @@ from volume_utils import (
     calc_weekend_boost,
     calc_bump_multiplier,
     calc_health_status,
+    calc_consecutive_decline_weeks,
     compute_volume_config_hash,
     get_week_dates,
     get_day_name,
@@ -367,6 +368,72 @@ class TestCalcHealthStatus:
         result = calc_health_status(saturation_score=25, decline_weeks=None)
         assert result["status"] == "HEALTHY"
         assert result["volume_adjustment"] == 1
+
+
+class TestCalcConsecutiveDeclineWeeks:
+    """Test consecutive decline weeks calculation."""
+
+    def test_empty_list_returns_zero(self):
+        """Empty data should return 0 decline weeks."""
+        assert calc_consecutive_decline_weeks([]) == 0
+
+    def test_single_week_returns_zero(self):
+        """Single week of data cannot show decline."""
+        data = [{"week": "2026-01", "weekly_earnings": 1000}]
+        assert calc_consecutive_decline_weeks(data) == 0
+
+    def test_one_decline_week(self):
+        """Two weeks with decline should return 1."""
+        data = [
+            {"week": "2026-02", "weekly_earnings": 900},
+            {"week": "2026-01", "weekly_earnings": 1000}
+        ]
+        assert calc_consecutive_decline_weeks(data) == 1
+
+    def test_consecutive_decline_breaks_on_increase(self):
+        """Decline chain should break when revenue increases."""
+        data = [
+            {"week": "2026-03", "weekly_earnings": 800},   # decline from 900
+            {"week": "2026-02", "weekly_earnings": 900},   # NOT decline (900 > 850)
+            {"week": "2026-01", "weekly_earnings": 850}
+        ]
+        assert calc_consecutive_decline_weeks(data) == 1  # Only first comparison is decline
+
+    def test_four_weeks_triggers_death_spiral(self):
+        """Four consecutive declining weeks indicates death spiral."""
+        data = [
+            {"week": "2026-04", "weekly_earnings": 600},
+            {"week": "2026-03", "weekly_earnings": 700},
+            {"week": "2026-02", "weekly_earnings": 800},
+            {"week": "2026-01", "weekly_earnings": 900},
+            {"week": "2025-52", "weekly_earnings": 1000}
+        ]
+        assert calc_consecutive_decline_weeks(data) == 4
+
+    def test_null_earnings_treated_as_zero(self):
+        """Null/None earnings should be treated as 0."""
+        data = [
+            {"week": "2026-02", "weekly_earnings": None},
+            {"week": "2026-01", "weekly_earnings": 100}
+        ]
+        # None (0) < 100, so this is a decline
+        assert calc_consecutive_decline_weeks(data) == 1
+
+    def test_flat_revenue_not_decline(self):
+        """Equal revenue week-over-week is NOT a decline."""
+        data = [
+            {"week": "2026-02", "weekly_earnings": 1000},
+            {"week": "2026-01", "weekly_earnings": 1000}
+        ]
+        assert calc_consecutive_decline_weeks(data) == 0
+
+    def test_increase_not_decline(self):
+        """Revenue increase should return 0 declines."""
+        data = [
+            {"week": "2026-02", "weekly_earnings": 1200},
+            {"week": "2026-01", "weekly_earnings": 1000}
+        ]
+        assert calc_consecutive_decline_weeks(data) == 0
 
 
 class TestComputeVolumeConfigHash:
