@@ -3,7 +3,7 @@ name: schedule-validator
 description: "Independently verifies schedule against hard gates and quality thresholds. Executes Phase 3 of the EROS pipeline. Invoked automatically after schedule generation."
 model: opus
 context: fork
-skills: [eros-schedule-generator]
+skills: [eros-schedule-validator]
 allowed-tools:
   - Read
   - Bash

@@ -14,6 +14,21 @@ Preflight (Python) → Generator (Sonnet) → Validator (Opus) → Save
 - **Validator**: Opus agent, independent verification against hard gates
 - **Save**: Persist schedule with ValidationCertificate
 
+## Activation Protocol (Required for All Agents)
+
+Before executing ANY pipeline phase:
+
+1. **Read `LEARNINGS.md`** - Check accumulated corrections and patterns
+   - HIGH confidence → MUST follow (these are corrections from past mistakes)
+   - MEDIUM confidence → SHOULD follow (these patterns work)
+   - LOW confidence → MAY inform (still being validated)
+
+2. **Review Hard Gates below** - Understand what causes rejection
+
+3. **Load relevant REFERENCE files** - Based on your phase and task
+
+**Skipping step 1 will repeat past mistakes.** The pipeline learns from every run.
+
 ## MCP Server
 
 | Attribute | Value |
@@ -62,12 +77,14 @@ These violations cause immediate schedule rejection:
 
 | File | Purpose |
 |------|---------|
-| `skills/eros-schedule-generator/SKILL.md` | Main skill definition |
-| `skills/eros-schedule-generator/REFERENCE/` | Domain knowledge (load on demand) |
+| `skills/eros-schedule-generator/SKILL.md` | Phase 2: Generation instructions |
+| `skills/eros-schedule-validator/SKILL.md` | Phase 3: Validation instructions |
+| `skills/eros-schedule-generator/REFERENCE/` | Generation domain knowledge |
+| `skills/eros-schedule-validator/REFERENCE/` | Validation rules |
 | `.claude/agents/schedule-generator.md` | Generator agent config |
 | `.claude/agents/schedule-validator.md` | Validator agent config |
-| `LEARNINGS.md` | Self-improving feedback accumulation |
-| `docs/DOMAIN_KNOWLEDGE.md` | Business rules reference |
+| `LEARNINGS.md` | Accumulated corrections and patterns |
+| `docs/DOMAIN_KNOWLEDGE.md` | Complete business rules reference |
 
 ## Development Guidelines
 
