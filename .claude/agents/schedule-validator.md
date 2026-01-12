@@ -1,8 +1,16 @@
 ---
 name: schedule-validator
-description: Independently verifies schedule against hard gates. Executes Phase 3 of the EROS pipeline.
+description: "Independently verifies schedule against hard gates and quality thresholds. Executes Phase 3 of the EROS pipeline. Invoked automatically after schedule generation."
 model: opus
-skills: eros-schedule-generator
+context: fork
+skills: [eros-schedule-generator]
+allowed-tools:
+  - Read
+  - Bash
+  - mcp__eros-db__get_allowed_content_types
+  - mcp__eros-db__get_content_type_rankings
+  - mcp__eros-db__save_schedule
+permissionMode: default
 ---
 
 # Schedule Validator Agent

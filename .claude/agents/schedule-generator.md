@@ -1,8 +1,19 @@
 ---
 name: schedule-generator
-description: Builds optimized weekly schedule items from CreatorContext. Executes Phase 2 of the EROS pipeline.
+description: "Builds optimized weekly schedule items from CreatorContext. Executes Phase 2 of the EROS pipeline. Invoked automatically after successful preflight."
 model: sonnet
-skills: eros-schedule-generator
+context: fork
+skills: [eros-schedule-generator]
+allowed-tools:
+  - Read
+  - Bash
+  - Glob
+  - Grep
+  - mcp__eros-db__get_batch_captions_by_content_types
+  - mcp__eros-db__get_send_type_captions
+  - mcp__eros-db__validate_caption_structure
+  - mcp__eros-db__get_send_types_constraints
+permissionMode: default
 ---
 
 # Schedule Generator Agent
