@@ -17,10 +17,10 @@
 ## Statistics
 
 ```yaml
-by_confidence: { high: 0, medium: 0, low: 0 }
-by_source: { validation: 0, user: 0, performance: 0 }
+by_confidence: { high: 0, medium: 21, low: 0 }
+by_source: { validation: 21, user: 0, performance: 0 }
 by_scope: { all_creators: 0, tier_specific: 0, creator_specific: 0 }
-last_7_days: { added: 0, promoted: 0, deprecated: 0 }
+last_7_days: { added: 21, promoted: 0, deprecated: 0 }
 ```
 
 ---
@@ -43,6 +43,132 @@ last_7_days: { added: 0, promoted: 0, deprecated: 0 }
 ## MEDIUM Confidence Learnings
 
 > SHOULD follow - Patterns from quality >= 85 schedules and user approvals
+
+### [2026-01-10] High Quality Pattern (90)
+**Pattern**: Schedule approved with 90 quality
+**Insight**: 5 send types used
+**Source**: validation | **Sample Size**: 1
+**Applies To**: creator:luna_free
+
+### [2026-01-10] High Quality Pattern (90)
+**Pattern**: Schedule approved with 90 quality
+**Insight**: 5 send types used
+**Source**: validation | **Sample Size**: 1
+**Applies To**: creator:grace_bennett
+
+### [2026-01-10] High Quality Pattern (90)
+**Pattern**: Schedule approved with 90 quality
+**Insight**: 5 send types used
+**Source**: validation | **Sample Size**: 1
+**Applies To**: creator:alexia
+
+### [2026-01-10] High Quality Pattern (90)
+**Pattern**: Schedule approved with 90 quality
+**Insight**: 5 send types used
+**Source**: validation | **Sample Size**: 1
+**Applies To**: creator:alexia
+
+### [2026-01-10] High Quality Pattern (90)
+**Pattern**: Schedule approved with 90 quality
+**Insight**: 5 send types used
+**Source**: validation | **Sample Size**: 1
+**Applies To**: creator:alexia
+
+### [2026-01-10] High Quality Pattern (90)
+**Pattern**: Schedule approved with 90 quality
+**Insight**: 5 send types used
+**Source**: validation | **Sample Size**: 1
+**Applies To**: creator:alexia
+
+### [2026-01-10] High Quality Pattern (90)
+**Pattern**: Schedule approved with 90 quality
+**Insight**: 5 send types used
+**Source**: validation | **Sample Size**: 1
+**Applies To**: creator:alexia
+
+### [2026-01-10] High Quality Pattern (90)
+**Pattern**: Schedule approved with 90 quality
+**Insight**: 5 send types used
+**Source**: validation | **Sample Size**: 1
+**Applies To**: creator:alexia
+
+### [2026-01-10] High Quality Pattern (90)
+**Pattern**: Schedule approved with 90 quality
+**Insight**: 5 send types used
+**Source**: validation | **Sample Size**: 1
+**Applies To**: creator:alexia
+
+### [2026-01-10] High Quality Pattern (90)
+**Pattern**: Schedule approved with 90 quality
+**Insight**: 5 send types used
+**Source**: validation | **Sample Size**: 1
+**Applies To**: creator:alexia
+
+### [2026-01-10] High Quality Pattern (90)
+**Pattern**: Schedule approved with 90 quality
+**Insight**: 5 send types used
+**Source**: validation | **Sample Size**: 1
+**Applies To**: creator:alexia
+
+### [2026-01-10] High Quality Pattern (90)
+**Pattern**: Schedule approved with 90 quality
+**Insight**: 5 send types used
+**Source**: validation | **Sample Size**: 1
+**Applies To**: creator:alexia
+
+### [2026-01-10] High Quality Pattern (90)
+**Pattern**: Schedule approved with 90 quality
+**Insight**: 5 send types used
+**Source**: validation | **Sample Size**: 1
+**Applies To**: creator:alexia
+
+### [2026-01-10] High Quality Pattern (90)
+**Pattern**: Schedule approved with 90 quality
+**Insight**: 5 send types used
+**Source**: validation | **Sample Size**: 1
+**Applies To**: creator:alexia
+
+### [2026-01-10] High Quality Pattern (90)
+**Pattern**: Schedule approved with 90 quality
+**Insight**: 5 send types used
+**Source**: validation | **Sample Size**: 1
+**Applies To**: creator:alexia
+
+### [2026-01-10] High Quality Pattern (90)
+**Pattern**: Schedule approved with 90 quality
+**Insight**: 5 send types used
+**Source**: validation | **Sample Size**: 1
+**Applies To**: creator:alexia
+
+### [2026-01-10] High Quality Pattern (90)
+**Pattern**: Schedule approved with 90 quality
+**Insight**: 5 send types used
+**Source**: validation | **Sample Size**: 1
+**Applies To**: creator:agents
+
+### [2026-01-10] High Quality Pattern (90)
+**Pattern**: Schedule approved with 90 quality
+**Insight**: 5 send types used
+**Source**: validation | **Sample Size**: 1
+**Applies To**: creator:metrics
+
+### [2026-01-10] High Quality Pattern (90)
+**Pattern**: Schedule approved with 90 quality
+**Insight**: 5 send types used
+**Source**: validation | **Sample Size**: 1
+**Applies To**: creator:save_fail
+
+### [2026-01-10] High Quality Pattern (90)
+**Pattern**: Schedule approved with 90 quality
+**Insight**: 5 send types used
+**Source**: validation | **Sample Size**: 1
+**Applies To**: creator:paid_page
+
+### [2026-01-10] High Quality Pattern (90)
+**Pattern**: Schedule approved with 90 quality
+**Insight**: 5 send types used
+**Source**: validation | **Sample Size**: 1
+**Applies To**: creator:alexia
 
 <!-- Entry Template:
 ### [YYYY-MM-DD] Title
@@ -83,6 +209,27 @@ last_7_days: { added: 0, promoted: 0, deprecated: 0 }
 
 | Date | Action | Learning | Confidence | Source |
 |------|--------|----------|------------|--------|
+| 2026-01-10 | ADDED | High Quality Pattern (90) | MEDIUM | validation |
+| 2026-01-10 | ADDED | High Quality Pattern (90) | MEDIUM | validation |
+| 2026-01-10 | ADDED | High Quality Pattern (90) | MEDIUM | validation |
+| 2026-01-10 | ADDED | High Quality Pattern (90) | MEDIUM | validation |
+| 2026-01-10 | ADDED | High Quality Pattern (90) | MEDIUM | validation |
+| 2026-01-10 | ADDED | High Quality Pattern (90) | MEDIUM | validation |
+| 2026-01-10 | ADDED | High Quality Pattern (90) | MEDIUM | validation |
+| 2026-01-10 | ADDED | High Quality Pattern (90) | MEDIUM | validation |
+| 2026-01-10 | ADDED | High Quality Pattern (90) | MEDIUM | validation |
+| 2026-01-10 | ADDED | High Quality Pattern (90) | MEDIUM | validation |
+| 2026-01-10 | ADDED | High Quality Pattern (90) | MEDIUM | validation |
+| 2026-01-10 | ADDED | High Quality Pattern (90) | MEDIUM | validation |
+| 2026-01-10 | ADDED | High Quality Pattern (90) | MEDIUM | validation |
+| 2026-01-10 | ADDED | High Quality Pattern (90) | MEDIUM | validation |
+| 2026-01-10 | ADDED | High Quality Pattern (90) | MEDIUM | validation |
+| 2026-01-10 | ADDED | High Quality Pattern (90) | MEDIUM | validation |
+| 2026-01-10 | ADDED | High Quality Pattern (90) | MEDIUM | validation |
+| 2026-01-10 | ADDED | High Quality Pattern (90) | MEDIUM | validation |
+| 2026-01-10 | ADDED | High Quality Pattern (90) | MEDIUM | validation |
+| 2026-01-10 | ADDED | High Quality Pattern (90) | MEDIUM | validation |
+| 2026-01-10 | ADDED | High Quality Pattern (90) | MEDIUM | validation |
 | 2026-01-06 | CREATED | Initial structure | - | system |
 
 ---
