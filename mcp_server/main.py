@@ -33,14 +33,17 @@ from pathlib import Path
 from contextlib import contextmanager
 from datetime import datetime
 
-from volume_utils import (
+from .volume_utils import (
     TIERS, TIER_ORDER, PRIME_HOURS, DAY_NAMES,
     get_tier, get_tier_ranges, calc_calendar_boost, calc_weekend_boost,
     calc_bump_multiplier, calc_health_status, calc_consecutive_decline_weeks,
     compute_volume_config_hash, get_week_dates, get_day_name,
     # Caption tool constants (v2.0)
     CAPTION_TIER_LABELS, CAPTION_TIER_SCORES, EFFECTIVELY_FRESH_DAYS,
-    VALID_SCHEDULABLE_TYPES, MAX_CONTENT_TYPES
+    VALID_SCHEDULABLE_TYPES, MAX_CONTENT_TYPES,
+    # Caption validation constants (v2.0.0)
+    CAPTION_LENGTH_THRESHOLDS, CAPTION_SPAM_PATTERNS, SALES_LANGUAGE_TOLERANT,
+    CAPTION_SCORE_THRESHOLDS, CAPTION_MAX_INPUT_LENGTH, CAPTION_VALIDATION_ERROR_CODES
 )
 
 # Configure logging
@@ -1770,7 +1773,7 @@ def get_active_volume_triggers(creator_id: str) -> dict:
     import hashlib
     from datetime import datetime
     # CRITICAL: Use relative import (we're inside mcp_server/)
-    from volume_utils import (
+    from .volume_utils import (
         TRIGGER_MULT_MIN, TRIGGER_MULT_MAX,
         calculate_compound_multiplier,
         ZERO_TRIGGER_REASONS
@@ -2260,7 +2263,7 @@ def save_schedule(
         - queued: REJECT with SCHEDULE_LOCKED
         - completed: REJECT with SCHEDULE_COMPLETED
     """
-    from volume_utils import (
+    from .volume_utils import (
         validate_schedule_items,
         validate_certificate_freshness,
         compute_schedule_hash
@@ -2605,7 +2608,7 @@ def save_volume_triggers(creator_id: str, triggers: list) -> dict:
     start_time = datetime.now()
 
     # CRITICAL: Use relative import (we're inside mcp_server/)
-    from volume_utils import validate_trigger
+    from .volume_utils import validate_trigger
 
     logger.info(f"save_volume_triggers: creator_id={creator_id}, triggers={len(triggers)}")
 

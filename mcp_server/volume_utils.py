@@ -845,3 +845,56 @@ CAPTION_TOOL_ERROR_CODES: Final[frozenset] = frozenset({
 VALID_SCHEDULABLE_TYPES: Final[frozenset] = frozenset({'ppv', 'ppv_bump', 'wall'})
 
 MAX_CONTENT_TYPES: Final[int] = 50
+
+
+# =============================================================================
+# CAPTION VALIDATION CONSTANTS (added for validate_caption_structure v2.0)
+# =============================================================================
+
+# Length thresholds by send_type category
+# Revenue captions need more detail for conversions
+# Engagement can be brief and casual
+# Retention should feel personal but complete
+CAPTION_LENGTH_THRESHOLDS: Final[dict[str, dict[str, int]]] = {
+    "revenue": {"min": 40, "ideal_min": 80, "ideal_max": 300, "max": 450},
+    "engagement": {"min": 15, "ideal_min": 30, "ideal_max": 150, "max": 250},
+    "retention": {"min": 25, "ideal_min": 50, "ideal_max": 200, "max": 300},
+    "default": {"min": 10, "ideal_min": 20, "ideal_max": 300, "max": 500}
+}
+
+# Spam patterns with penalties
+# "universal" applies to all categories
+# "non_revenue" only applies to engagement/retention (sales language OK for revenue)
+CAPTION_SPAM_PATTERNS: Final[dict[str, list[tuple[str, int]]]] = {
+    "universal": [
+        ("click here", 15),
+        ("act now", 15),
+        ("buy now", 15),
+        ("hurry", 5),
+    ],
+    "non_revenue": [
+        ("limited time", 10),
+        ("exclusive offer", 10),
+        ("don't miss", 10),
+    ]
+}
+
+# Categories that tolerate sales/promotional language
+SALES_LANGUAGE_TOLERANT: Final[frozenset[str]] = frozenset({"revenue"})
+
+# Score thresholds for recommendations
+CAPTION_SCORE_THRESHOLDS: Final[dict[str, int]] = {
+    "pass": 85,
+    "review": 70,
+    "reject": 0
+}
+
+# Maximum caption input length (guard against abuse/memory issues)
+CAPTION_MAX_INPUT_LENGTH: Final[int] = 2000
+
+# Error codes for validate_caption_structure
+CAPTION_VALIDATION_ERROR_CODES: Final[frozenset[str]] = frozenset({
+    "EMPTY_CAPTION",
+    "INVALID_SEND_TYPE",
+    "CAPTION_EXCEEDS_LIMIT"
+})
