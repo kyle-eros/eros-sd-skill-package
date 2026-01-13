@@ -1,6 +1,6 @@
 # EROS Self-Improving Skills - Learning Accumulation
 
-**Version**: 1.0.0 | **Last Updated**: 2026-01-06 | **Total Learnings**: 0
+**Version**: 1.1.0 | **Last Updated**: 2026-01-12 | **Total Learnings**: 0
 
 ---
 
@@ -17,10 +17,10 @@
 ## Statistics
 
 ```yaml
-by_confidence: { high: 0, medium: 21, low: 0 }
-by_source: { validation: 21, user: 0, performance: 0 }
+by_confidence: { high: 0, medium: 0, low: 0 }
+by_source: { validation: 0, user: 0, performance: 0 }
 by_scope: { all_creators: 0, tier_specific: 0, creator_specific: 0 }
-last_7_days: { added: 21, promoted: 0, deprecated: 0 }
+last_7_days: { added: 0, promoted: 0, deprecated: 0 }
 ```
 
 ---
@@ -44,132 +44,6 @@ last_7_days: { added: 21, promoted: 0, deprecated: 0 }
 
 > SHOULD follow - Patterns from quality >= 85 schedules and user approvals
 
-### [2026-01-10] High Quality Pattern (90)
-**Pattern**: Schedule approved with 90 quality
-**Insight**: 5 send types used
-**Source**: validation | **Sample Size**: 1
-**Applies To**: creator:luna_free
-
-### [2026-01-10] High Quality Pattern (90)
-**Pattern**: Schedule approved with 90 quality
-**Insight**: 5 send types used
-**Source**: validation | **Sample Size**: 1
-**Applies To**: creator:grace_bennett
-
-### [2026-01-10] High Quality Pattern (90)
-**Pattern**: Schedule approved with 90 quality
-**Insight**: 5 send types used
-**Source**: validation | **Sample Size**: 1
-**Applies To**: creator:alexia
-
-### [2026-01-10] High Quality Pattern (90)
-**Pattern**: Schedule approved with 90 quality
-**Insight**: 5 send types used
-**Source**: validation | **Sample Size**: 1
-**Applies To**: creator:alexia
-
-### [2026-01-10] High Quality Pattern (90)
-**Pattern**: Schedule approved with 90 quality
-**Insight**: 5 send types used
-**Source**: validation | **Sample Size**: 1
-**Applies To**: creator:alexia
-
-### [2026-01-10] High Quality Pattern (90)
-**Pattern**: Schedule approved with 90 quality
-**Insight**: 5 send types used
-**Source**: validation | **Sample Size**: 1
-**Applies To**: creator:alexia
-
-### [2026-01-10] High Quality Pattern (90)
-**Pattern**: Schedule approved with 90 quality
-**Insight**: 5 send types used
-**Source**: validation | **Sample Size**: 1
-**Applies To**: creator:alexia
-
-### [2026-01-10] High Quality Pattern (90)
-**Pattern**: Schedule approved with 90 quality
-**Insight**: 5 send types used
-**Source**: validation | **Sample Size**: 1
-**Applies To**: creator:alexia
-
-### [2026-01-10] High Quality Pattern (90)
-**Pattern**: Schedule approved with 90 quality
-**Insight**: 5 send types used
-**Source**: validation | **Sample Size**: 1
-**Applies To**: creator:alexia
-
-### [2026-01-10] High Quality Pattern (90)
-**Pattern**: Schedule approved with 90 quality
-**Insight**: 5 send types used
-**Source**: validation | **Sample Size**: 1
-**Applies To**: creator:alexia
-
-### [2026-01-10] High Quality Pattern (90)
-**Pattern**: Schedule approved with 90 quality
-**Insight**: 5 send types used
-**Source**: validation | **Sample Size**: 1
-**Applies To**: creator:alexia
-
-### [2026-01-10] High Quality Pattern (90)
-**Pattern**: Schedule approved with 90 quality
-**Insight**: 5 send types used
-**Source**: validation | **Sample Size**: 1
-**Applies To**: creator:alexia
-
-### [2026-01-10] High Quality Pattern (90)
-**Pattern**: Schedule approved with 90 quality
-**Insight**: 5 send types used
-**Source**: validation | **Sample Size**: 1
-**Applies To**: creator:alexia
-
-### [2026-01-10] High Quality Pattern (90)
-**Pattern**: Schedule approved with 90 quality
-**Insight**: 5 send types used
-**Source**: validation | **Sample Size**: 1
-**Applies To**: creator:alexia
-
-### [2026-01-10] High Quality Pattern (90)
-**Pattern**: Schedule approved with 90 quality
-**Insight**: 5 send types used
-**Source**: validation | **Sample Size**: 1
-**Applies To**: creator:alexia
-
-### [2026-01-10] High Quality Pattern (90)
-**Pattern**: Schedule approved with 90 quality
-**Insight**: 5 send types used
-**Source**: validation | **Sample Size**: 1
-**Applies To**: creator:alexia
-
-### [2026-01-10] High Quality Pattern (90)
-**Pattern**: Schedule approved with 90 quality
-**Insight**: 5 send types used
-**Source**: validation | **Sample Size**: 1
-**Applies To**: creator:agents
-
-### [2026-01-10] High Quality Pattern (90)
-**Pattern**: Schedule approved with 90 quality
-**Insight**: 5 send types used
-**Source**: validation | **Sample Size**: 1
-**Applies To**: creator:metrics
-
-### [2026-01-10] High Quality Pattern (90)
-**Pattern**: Schedule approved with 90 quality
-**Insight**: 5 send types used
-**Source**: validation | **Sample Size**: 1
-**Applies To**: creator:save_fail
-
-### [2026-01-10] High Quality Pattern (90)
-**Pattern**: Schedule approved with 90 quality
-**Insight**: 5 send types used
-**Source**: validation | **Sample Size**: 1
-**Applies To**: creator:paid_page
-
-### [2026-01-10] High Quality Pattern (90)
-**Pattern**: Schedule approved with 90 quality
-**Insight**: 5 send types used
-**Source**: validation | **Sample Size**: 1
-**Applies To**: creator:alexia
-
 <!-- Entry Template:
 ### [YYYY-MM-DD] Title
 **Pattern**: What was observed | **Insight**: Why it works
@@ -183,6 +57,13 @@ last_7_days: { added: 21, promoted: 0, deprecated: 0 }
 ## LOW Confidence Learnings
 
 > MAY inform - Observations with sample < 10, trends to monitor
+
+### [2026-01-12] save_schedule v2.0.0 Schema Alignment
+**Observation**: 6 column name mismatches between MCP tool and database schema caused silent failures
+**Hypothesis**: Schema drift between documentation, code, and database is a recurring risk
+**Source**: refactor | **Sample Size**: 1
+**Applies To**: all
+**Promote When**: Similar schema issues found in other MCP tools
 
 <!-- Entry Template:
 ### [YYYY-MM-DD] Title
@@ -198,10 +79,9 @@ last_7_days: { added: 21, promoted: 0, deprecated: 0 }
 
 > Superseded, invalidated, or expired learnings
 
-<!-- Entry Template:
-### [YYYY-MM-DD] Title (Deprecated: YYYY-MM-DD)
-**Original**: Summary | **Reason**: Superseded by | Invalidated | Expired
--->
+### [2026-01-12] Test Artifacts Removed
+**Original**: 47 "High Quality Pattern (90)" entries from test/mock validations
+**Reason**: Invalidated - entries were from test runs with mock data, not production schedules
 
 ---
 
@@ -209,27 +89,8 @@ last_7_days: { added: 21, promoted: 0, deprecated: 0 }
 
 | Date | Action | Learning | Confidence | Source |
 |------|--------|----------|------------|--------|
-| 2026-01-10 | ADDED | High Quality Pattern (90) | MEDIUM | validation |
-| 2026-01-10 | ADDED | High Quality Pattern (90) | MEDIUM | validation |
-| 2026-01-10 | ADDED | High Quality Pattern (90) | MEDIUM | validation |
-| 2026-01-10 | ADDED | High Quality Pattern (90) | MEDIUM | validation |
-| 2026-01-10 | ADDED | High Quality Pattern (90) | MEDIUM | validation |
-| 2026-01-10 | ADDED | High Quality Pattern (90) | MEDIUM | validation |
-| 2026-01-10 | ADDED | High Quality Pattern (90) | MEDIUM | validation |
-| 2026-01-10 | ADDED | High Quality Pattern (90) | MEDIUM | validation |
-| 2026-01-10 | ADDED | High Quality Pattern (90) | MEDIUM | validation |
-| 2026-01-10 | ADDED | High Quality Pattern (90) | MEDIUM | validation |
-| 2026-01-10 | ADDED | High Quality Pattern (90) | MEDIUM | validation |
-| 2026-01-10 | ADDED | High Quality Pattern (90) | MEDIUM | validation |
-| 2026-01-10 | ADDED | High Quality Pattern (90) | MEDIUM | validation |
-| 2026-01-10 | ADDED | High Quality Pattern (90) | MEDIUM | validation |
-| 2026-01-10 | ADDED | High Quality Pattern (90) | MEDIUM | validation |
-| 2026-01-10 | ADDED | High Quality Pattern (90) | MEDIUM | validation |
-| 2026-01-10 | ADDED | High Quality Pattern (90) | MEDIUM | validation |
-| 2026-01-10 | ADDED | High Quality Pattern (90) | MEDIUM | validation |
-| 2026-01-10 | ADDED | High Quality Pattern (90) | MEDIUM | validation |
-| 2026-01-10 | ADDED | High Quality Pattern (90) | MEDIUM | validation |
-| 2026-01-10 | ADDED | High Quality Pattern (90) | MEDIUM | validation |
+| 2026-01-12 | CLEANED | Removed 47 test-generated entries | - | refactor |
+| 2026-01-12 | ADDED | save_schedule v2.0.0 Schema Alignment | LOW | refactor |
 | 2026-01-06 | CREATED | Initial structure | - | system |
 
 ---
@@ -239,7 +100,7 @@ last_7_days: { added: 21, promoted: 0, deprecated: 0 }
 ### Validation Phase (Immediate)
 ```python
 if certificate.status == "REJECTED":
-    add_learning(confidence="HIGH", source="validation", 
+    add_learning(confidence="HIGH", source="validation",
                  violation=certificate.violations, pattern=context)
 if certificate.quality_score >= 85:
     add_learning(confidence="MEDIUM", source="validation",
