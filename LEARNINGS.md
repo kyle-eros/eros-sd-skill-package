@@ -1,6 +1,6 @@
 # EROS Self-Improving Skills - Learning Accumulation
 
-**Version**: 1.3.0 | **Last Updated**: 2026-01-12 | **Total Learnings**: 7
+**Version**: 1.4.0 | **Last Updated**: 2026-01-13 | **Total Learnings**: 10
 
 ---
 
@@ -17,10 +17,10 @@
 ## Statistics
 
 ```yaml
-by_confidence: { high: 0, medium: 175, low: 5 }
-by_source: { validation: 173, user: 1, performance: 0, refactor: 6 }
-by_scope: { all_creators: 7, tier_specific: 0, creator_specific: 0 }
-last_7_days: { added: 179, promoted: 0, deprecated: 0 }
+by_confidence: { high: 0, medium: 196, low: 8 }
+by_source: { validation: 194, user: 1, performance: 0, refactor: 9 }
+by_scope: { all_creators: 10, tier_specific: 0, creator_specific: 0 }
+last_7_days: { added: 203, promoted: 0, deprecated: 0 }
 ```
 
 ---
@@ -43,6 +43,132 @@ last_7_days: { added: 179, promoted: 0, deprecated: 0 }
 ## MEDIUM Confidence Learnings
 
 > SHOULD follow - Patterns from quality >= 85 schedules and user approvals
+
+### [2026-01-13] High Quality Pattern (90)
+**Pattern**: Schedule approved with 90 quality
+**Insight**: 5 send types used
+**Source**: validation | **Sample Size**: 1
+**Applies To**: creator:luna_free
+
+### [2026-01-13] High Quality Pattern (90)
+**Pattern**: Schedule approved with 90 quality
+**Insight**: 5 send types used
+**Source**: validation | **Sample Size**: 1
+**Applies To**: creator:grace_bennett
+
+### [2026-01-13] High Quality Pattern (90)
+**Pattern**: Schedule approved with 90 quality
+**Insight**: 5 send types used
+**Source**: validation | **Sample Size**: 1
+**Applies To**: creator:alexia
+
+### [2026-01-13] High Quality Pattern (90)
+**Pattern**: Schedule approved with 90 quality
+**Insight**: 5 send types used
+**Source**: validation | **Sample Size**: 1
+**Applies To**: creator:alexia
+
+### [2026-01-13] High Quality Pattern (90)
+**Pattern**: Schedule approved with 90 quality
+**Insight**: 5 send types used
+**Source**: validation | **Sample Size**: 1
+**Applies To**: creator:alexia
+
+### [2026-01-13] High Quality Pattern (90)
+**Pattern**: Schedule approved with 90 quality
+**Insight**: 5 send types used
+**Source**: validation | **Sample Size**: 1
+**Applies To**: creator:alexia
+
+### [2026-01-13] High Quality Pattern (90)
+**Pattern**: Schedule approved with 90 quality
+**Insight**: 5 send types used
+**Source**: validation | **Sample Size**: 1
+**Applies To**: creator:alexia
+
+### [2026-01-13] High Quality Pattern (90)
+**Pattern**: Schedule approved with 90 quality
+**Insight**: 5 send types used
+**Source**: validation | **Sample Size**: 1
+**Applies To**: creator:alexia
+
+### [2026-01-13] High Quality Pattern (90)
+**Pattern**: Schedule approved with 90 quality
+**Insight**: 5 send types used
+**Source**: validation | **Sample Size**: 1
+**Applies To**: creator:alexia
+
+### [2026-01-13] High Quality Pattern (90)
+**Pattern**: Schedule approved with 90 quality
+**Insight**: 5 send types used
+**Source**: validation | **Sample Size**: 1
+**Applies To**: creator:alexia
+
+### [2026-01-13] High Quality Pattern (90)
+**Pattern**: Schedule approved with 90 quality
+**Insight**: 5 send types used
+**Source**: validation | **Sample Size**: 1
+**Applies To**: creator:alexia
+
+### [2026-01-13] High Quality Pattern (90)
+**Pattern**: Schedule approved with 90 quality
+**Insight**: 5 send types used
+**Source**: validation | **Sample Size**: 1
+**Applies To**: creator:alexia
+
+### [2026-01-13] High Quality Pattern (90)
+**Pattern**: Schedule approved with 90 quality
+**Insight**: 5 send types used
+**Source**: validation | **Sample Size**: 1
+**Applies To**: creator:alexia
+
+### [2026-01-13] High Quality Pattern (90)
+**Pattern**: Schedule approved with 90 quality
+**Insight**: 5 send types used
+**Source**: validation | **Sample Size**: 1
+**Applies To**: creator:alexia
+
+### [2026-01-13] High Quality Pattern (90)
+**Pattern**: Schedule approved with 90 quality
+**Insight**: 5 send types used
+**Source**: validation | **Sample Size**: 1
+**Applies To**: creator:alexia
+
+### [2026-01-13] High Quality Pattern (90)
+**Pattern**: Schedule approved with 90 quality
+**Insight**: 5 send types used
+**Source**: validation | **Sample Size**: 1
+**Applies To**: creator:alexia
+
+### [2026-01-13] High Quality Pattern (90)
+**Pattern**: Schedule approved with 90 quality
+**Insight**: 5 send types used
+**Source**: validation | **Sample Size**: 1
+**Applies To**: creator:agents
+
+### [2026-01-13] High Quality Pattern (90)
+**Pattern**: Schedule approved with 90 quality
+**Insight**: 5 send types used
+**Source**: validation | **Sample Size**: 1
+**Applies To**: creator:metrics
+
+### [2026-01-13] High Quality Pattern (90)
+**Pattern**: Schedule approved with 90 quality
+**Insight**: 5 send types used
+**Source**: validation | **Sample Size**: 1
+**Applies To**: creator:save_fail
+
+### [2026-01-13] High Quality Pattern (90)
+**Pattern**: Schedule approved with 90 quality
+**Insight**: 5 send types used
+**Source**: validation | **Sample Size**: 1
+**Applies To**: creator:paid_page
+
+### [2026-01-13] High Quality Pattern (90)
+**Pattern**: Schedule approved with 90 quality
+**Insight**: 5 send types used
+**Source**: validation | **Sample Size**: 1
+**Applies To**: creator:alexia
 
 ### [2026-01-12] High Quality Pattern (90)
 **Pattern**: Schedule approved with 90 quality
@@ -1146,6 +1272,29 @@ last_7_days: { added: 179, promoted: 0, deprecated: 0 }
 **Applies To**: all
 **Promote When**: Pattern validated across 3+ schema change PRs
 
+### [2026-01-13] caption_type Stores send_type_key Values Directly
+**Observation**: caption_bank.caption_type column stores exact send_type_keys (ppv_unlock, bump_normal, etc.), not generic categories
+**Hypothesis**: Category-based fallback logic (ppv, bump, general) becomes dead code when data model stores granular values
+**Source**: refactor | **Sample Size**: 1 (49,550 captions analyzed, 20 distinct caption_types all match send_type_keys)
+**Applies To**: all
+**Evidence**: SELECT DISTINCT caption_type FROM caption_bank returns only send_type_keys
+**Promote When**: Pattern confirmed in other caption-related tool refactors
+
+### [2026-01-13] Per-Creator Freshness JOIN Pattern for Caption Tools
+**Observation**: JOIN caption_creator_performance enables per-creator usage tracking with 90-day freshness threshold
+**Hypothesis**: ORDER BY effectively_fresh DESC, ccp.last_used_date ASC NULLS FIRST prioritizes never-used-by-creator captions
+**Source**: refactor | **Sample Size**: 2 (get_batch_captions_by_content_types v2.0, get_send_type_captions v2.0)
+**Applies To**: all
+**Implementation**: LEFT JOIN caption_creator_performance ccp ON cb.caption_id = ccp.caption_id AND ccp.creator_id = ?
+**Promote When**: 3+ caption tools use this pattern successfully
+
+### [2026-01-13] Pool Stats Enable Informed Caption Distribution
+**Observation**: Returning pool_stats (total_available, fresh_for_creator, freshness_ratio) with caption queries aids agent decisions
+**Hypothesis**: schedule-generator can reduce send_type frequency or flag degraded freshness when pool_stats.freshness_ratio < 0.5
+**Source**: refactor | **Sample Size**: 2 (get_batch_captions_by_content_types v2.0, get_send_type_captions v2.0)
+**Applies To**: all
+**Promote When**: schedule-generator demonstrates usage of pool_stats in decision-making
+
 <!-- Entry Template:
 ### [YYYY-MM-DD] Title
 **Observation**: What was noticed | **Hypothesis**: Why it might matter
@@ -1170,6 +1319,27 @@ last_7_days: { added: 179, promoted: 0, deprecated: 0 }
 
 | Date | Action | Learning | Confidence | Source |
 |------|--------|----------|------------|--------|
+| 2026-01-13 | ADDED | High Quality Pattern (90) | MEDIUM | validation |
+| 2026-01-13 | ADDED | High Quality Pattern (90) | MEDIUM | validation |
+| 2026-01-13 | ADDED | High Quality Pattern (90) | MEDIUM | validation |
+| 2026-01-13 | ADDED | High Quality Pattern (90) | MEDIUM | validation |
+| 2026-01-13 | ADDED | High Quality Pattern (90) | MEDIUM | validation |
+| 2026-01-13 | ADDED | High Quality Pattern (90) | MEDIUM | validation |
+| 2026-01-13 | ADDED | High Quality Pattern (90) | MEDIUM | validation |
+| 2026-01-13 | ADDED | High Quality Pattern (90) | MEDIUM | validation |
+| 2026-01-13 | ADDED | High Quality Pattern (90) | MEDIUM | validation |
+| 2026-01-13 | ADDED | High Quality Pattern (90) | MEDIUM | validation |
+| 2026-01-13 | ADDED | High Quality Pattern (90) | MEDIUM | validation |
+| 2026-01-13 | ADDED | High Quality Pattern (90) | MEDIUM | validation |
+| 2026-01-13 | ADDED | High Quality Pattern (90) | MEDIUM | validation |
+| 2026-01-13 | ADDED | High Quality Pattern (90) | MEDIUM | validation |
+| 2026-01-13 | ADDED | High Quality Pattern (90) | MEDIUM | validation |
+| 2026-01-13 | ADDED | High Quality Pattern (90) | MEDIUM | validation |
+| 2026-01-13 | ADDED | High Quality Pattern (90) | MEDIUM | validation |
+| 2026-01-13 | ADDED | High Quality Pattern (90) | MEDIUM | validation |
+| 2026-01-13 | ADDED | High Quality Pattern (90) | MEDIUM | validation |
+| 2026-01-13 | ADDED | High Quality Pattern (90) | MEDIUM | validation |
+| 2026-01-13 | ADDED | High Quality Pattern (90) | MEDIUM | validation |
 | 2026-01-12 | ADDED | High Quality Pattern (90) | MEDIUM | validation |
 | 2026-01-12 | ADDED | High Quality Pattern (90) | MEDIUM | validation |
 | 2026-01-12 | ADDED | High Quality Pattern (90) | MEDIUM | validation |
@@ -1351,6 +1521,9 @@ last_7_days: { added: 179, promoted: 0, deprecated: 0 }
 | 2026-01-12 | ADDED | Test Fixture Schema Sync Requirement | LOW | refactor |
 | 2026-01-12 | CLEANED | Removed 47 test-generated entries | - | refactor |
 | 2026-01-12 | ADDED | save_schedule v2.0.0 Schema Alignment | LOW | refactor |
+| 2026-01-13 | ADDED | caption_type Stores send_type_key Directly | LOW | refactor |
+| 2026-01-13 | ADDED | Per-Creator Freshness JOIN Pattern | LOW | refactor |
+| 2026-01-13 | ADDED | Pool Stats Enable Caption Distribution | LOW | refactor |
 | 2026-01-06 | CREATED | Initial structure | - | system |
 
 ---
