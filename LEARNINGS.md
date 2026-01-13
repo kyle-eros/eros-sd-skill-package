@@ -1,6 +1,6 @@
 # EROS Self-Improving Skills - Learning Accumulation
 
-**Version**: 1.4.0 | **Last Updated**: 2026-01-13 | **Total Learnings**: 10
+**Version**: 1.5.0 | **Last Updated**: 2026-01-13 | **Total Learnings**: 13
 
 ---
 
@@ -17,8 +17,8 @@
 ## Statistics
 
 ```yaml
-by_confidence: { high: 0, medium: 196, low: 8 }
-by_source: { validation: 194, user: 1, performance: 0, refactor: 9 }
+by_confidence: { high: 0, medium: 197, low: 10 }
+by_source: { validation: 194, user: 1, performance: 0, refactor: 12 }
 by_scope: { all_creators: 10, tier_specific: 0, creator_specific: 0 }
 last_7_days: { added: 203, promoted: 0, deprecated: 0 }
 ```
@@ -1223,6 +1223,14 @@ last_7_days: { added: 203, promoted: 0, deprecated: 0 }
 **Workflow**: Preflight → Phase 1..N (each: sub-agent → verify → commit) → Final verification
 **Promote When**: Pattern used successfully in 3+ multi-phase refactorings
 
+### [2026-01-13] Category-Aware Validation Pattern for Multi-Purpose Tools
+**Pattern**: Validation tools serving different send categories (revenue/engagement/retention) need category-specific rules
+**Insight**: Revenue allows longer captions (450 chars) and tolerates sales language; engagement/retention stricter
+**Source**: refactor | **Sample Size**: 1 (validate_caption_structure v2.0.0: 28 tests, all passing)
+**Applies To**: all
+**Implementation**: `CAPTION_LENGTH_THRESHOLDS` dict in volume_utils.py with per-category min/ideal/max ranges
+**Promote When**: Pattern reused in 2+ other validation tools
+
 <!-- Entry Template:
 ### [YYYY-MM-DD] Title
 **Pattern**: What was observed | **Insight**: Why it works
@@ -1294,6 +1302,22 @@ last_7_days: { added: 203, promoted: 0, deprecated: 0 }
 **Source**: refactor | **Sample Size**: 2 (get_batch_captions_by_content_types v2.0, get_send_type_captions v2.0)
 **Applies To**: all
 **Promote When**: schedule-generator demonstrates usage of pool_stats in decision-making
+
+### [2026-01-13] Test sys.path Must Use Project Root, Not Module Directory
+**Observation**: pytest imports failed when sys.path pointed to mcp_server/ because main.py uses relative import `from .volume_utils import`
+**Hypothesis**: Always insert project root into sys.path, then patch fully-qualified paths like `mcp_server.main.db_query`
+**Source**: refactor | **Sample Size**: 1 (validate_caption_structure v2.0.0 tests required fix)
+**Applies To**: all
+**Fix Pattern**: `sys.path.insert(0, '/path/to/project')` + `patch('mcp_server.main.db_query')`
+**Promote When**: Confirmed in 2+ additional test files
+
+### [2026-01-13] Module-Level Caching Pattern for MCP DB Lookups
+**Observation**: Repeated DB queries for static data (send_types taxonomy) add latency without benefit
+**Hypothesis**: Module-level dict cache (`_SEND_TYPES_CACHE: dict[str, dict] = {}`) with session lifetime reduces calls
+**Source**: refactor | **Sample Size**: 1 (validate_caption_structure v2.0.0 caches send_types)
+**Applies To**: all
+**Implementation**: Check cache → call db_query if miss → populate cache → return from cache
+**Promote When**: Pattern reused in 2+ other MCP tools
 
 <!-- Entry Template:
 ### [YYYY-MM-DD] Title
@@ -1524,6 +1548,9 @@ last_7_days: { added: 203, promoted: 0, deprecated: 0 }
 | 2026-01-13 | ADDED | caption_type Stores send_type_key Directly | LOW | refactor |
 | 2026-01-13 | ADDED | Per-Creator Freshness JOIN Pattern | LOW | refactor |
 | 2026-01-13 | ADDED | Pool Stats Enable Caption Distribution | LOW | refactor |
+| 2026-01-13 | ADDED | Category-Aware Validation Pattern | MEDIUM | refactor |
+| 2026-01-13 | ADDED | Test sys.path Project Root Requirement | LOW | refactor |
+| 2026-01-13 | ADDED | Module-Level Caching Pattern | LOW | refactor |
 | 2026-01-06 | CREATED | Initial structure | - | system |
 
 ---
