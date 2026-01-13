@@ -30,10 +30,20 @@ The Ralph Wiggum method keeps Claude running in a continuous loop until tasks ar
 - **Output:** `review.md`
 
 ### Phase 2: Interview & Spec Generation
-- **Mode:** Semi-autonomous (interview + loop)
-- **Max Iterations:** 15
-- **Completion Promise:** `SPEC_DONE`
-- **Output:** `[tool_name].md`
+
+**Mode:** Semi-autonomous (interview + loop)  
+**Max Iterations:** 15  
+**Completion Signal:** `SPEC_DONE`  
+**Output:** `[tool_name].md`
+
+#### Interview Requirements
+
+1. Use `AskUserQuestionTool` to gather specification details
+2. Ask probing, non-obvious questions—avoid surface-level queries Claude could infer
+3. Cover edge cases, error handling, input/output formats, and integration points
+4. Continue interviewing until all ambiguities are resolved
+5. Generate `[tool_name].md` spec file upon completion
+6. Replace existing `fixes.md` with finalized version
 
 ### Phase 3: Refactoring Execution
 - **Mode:** Sequential autonomous loops (one per phase)
