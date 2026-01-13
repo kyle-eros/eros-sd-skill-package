@@ -430,7 +430,53 @@ Certificate must be < 5 minutes old at save_schedule time.
 
 ---
 
-## 10. Essential MCP Tools
+## 10. Schedule Persistence
+
+### save_schedule Workflow (v2.0.0)
+
+1. **Input Validation** - creator_id required, week_start YYYY-MM-DD format
+2. **Items Validation** - Required keys (send_type_key, scheduled_date, scheduled_time), format checks, $5-$50 price bounds
+3. **Certificate Freshness** - Soft gate: 300s TTL + 30s tolerance, expired = draft status
+4. **Database Operation** - Status-aware UPSERT with revision tracking
+
+### Status Lifecycle
+
+```
+draft → approved → queued → completed
+  ↓        ↓         ↓          ↓
+UPSERT   UPSERT   LOCKED    LOCKED
+```
+
+| Status | Meaning | Modifiable |
+|--------|---------|------------|
+| draft | Initial save without certificate or with expired certificate | Yes |
+| approved | Valid fresh certificate with APPROVED status | Yes |
+| queued | Locked for execution (cannot modify) | No |
+| completed | Historical record (immutable) | No |
+
+### Error Codes
+
+| Code | Cause | Resolution |
+|------|-------|------------|
+| CREATOR_NOT_FOUND | Invalid creator_id/page_name | Verify creator exists |
+| VALIDATION_ERROR | Items failed structural validation | Fix item format |
+| INVALID_DATE | week_start not YYYY-MM-DD | Use correct date format |
+| SCHEDULE_LOCKED | Status is 'queued' | Wait for execution |
+| SCHEDULE_COMPLETED | Status is 'completed' | Create new schedule |
+| DATABASE_ERROR | SQLite operation failed | Check DB connection |
+
+### Duplicate Handling (UPSERT)
+
+When saving a schedule that already exists for the same creator_id + week_start:
+
+- **draft** → Replaced with new schedule
+- **approved** → Replaced with new schedule
+- **queued** → Rejected with SCHEDULE_LOCKED
+- **completed** → Rejected with SCHEDULE_COMPLETED
+
+---
+
+## 11. Essential MCP Tools
 
 ### Must Keep (15 Tools)
 

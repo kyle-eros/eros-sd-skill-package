@@ -337,8 +337,54 @@ class MockMCPClient:
 
     async def save_schedule(self, creator_id: str, week_start: str,
                             items: list, validation_certificate: dict | None = None) -> dict:
+        """Mock save_schedule v2.0.0 response structure."""
         self._log("save_schedule")
-        return {"schedule_id": 12345, "template_id": 12345, "items_saved": len(items)}
+
+        # Calculate week_end (6 days after week_start)
+        from datetime import timedelta
+        week_start_dt = datetime.strptime(week_start, "%Y-%m-%d")
+        week_end_dt = week_start_dt + timedelta(days=6)
+        week_end = week_end_dt.strftime("%Y-%m-%d")
+
+        # Determine status based on certificate
+        status = "approved" if validation_certificate else "draft"
+        has_certificate = validation_certificate is not None
+
+        # Generate schedule hash
+        hash_input = f"{creator_id}|{week_start}|{len(items)}"
+        schedule_hash = f"sha256:{hashlib.sha256(hash_input.encode()).hexdigest()[:16]}"
+
+        response = {
+            "success": True,
+            "schedule_id": 99999,
+            "template_id": 99999,
+            "items_saved": len(items) if items else 0,
+            "creator_id": creator_id,
+            "creator_id_resolved": f"{creator_id}_001",
+            "week_start": week_start,
+            "week_end": week_end,
+            "status": status,
+            "has_certificate": has_certificate,
+            "metadata": {
+                "saved_at": datetime.now().isoformat() + "Z",
+                "query_ms": 10.0,
+                "schedule_hash": schedule_hash
+            },
+            "replaced": False,
+            "warnings": []
+        }
+
+        # Add certificate_summary if certificate provided
+        if validation_certificate:
+            response["certificate_summary"] = {
+                "validation_status": validation_certificate.get("validation_status", "APPROVED"),
+                "quality_score": validation_certificate.get("quality_score", 85),
+                "items_validated": validation_certificate.get("items_validated", len(items)),
+                "is_fresh": True,
+                "age_seconds": 30
+            }
+
+        return response
 
 
 class MockTaskTool:

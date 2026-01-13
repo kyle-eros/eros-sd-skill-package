@@ -329,6 +329,76 @@ result = get_performance_trends("alexia", "14d")
 # Returns performance metrics with health status and saturation analysis
 ```
 
+### save_schedule Enhancement (v2.0.0)
+
+**Version:** 2.0.0
+**MCP Name:** `mcp__eros-db__save_schedule`
+
+Persists generated schedule with validation certificate. Final step of 3-phase pipeline.
+
+#### Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| creator_id | string | Yes | Creator identifier (creator_id or page_name) |
+| week_start | string | Yes | Week start date (YYYY-MM-DD) |
+| items | list | Yes | Schedule items from Generator phase |
+| validation_certificate | dict | No | ValidationCertificate from Validator phase |
+
+#### Response (Success)
+
+```json
+{
+  "success": true,
+  "schedule_id": 12345,
+  "template_id": 12345,
+  "items_saved": 54,
+  "creator_id": "grace_bennett",
+  "creator_id_resolved": "abc123-uuid",
+  "week_start": "2026-01-06",
+  "week_end": "2026-01-12",
+  "status": "approved",
+  "has_certificate": true,
+  "metadata": {
+    "saved_at": "2026-01-12T14:30:00Z",
+    "query_ms": 45.2,
+    "schedule_hash": "sha256:a1b2c3d4..."
+  },
+  "certificate_summary": {
+    "validation_status": "APPROVED",
+    "quality_score": 87,
+    "items_validated": 54,
+    "is_fresh": true,
+    "age_seconds": 142
+  },
+  "replaced": false,
+  "warnings": []
+}
+```
+
+#### Error Codes
+
+| Code | Cause |
+|------|-------|
+| CREATOR_NOT_FOUND | creator_id/page_name not in database |
+| VALIDATION_ERROR | Items failed structural validation |
+| INVALID_DATE | week_start not YYYY-MM-DD format |
+| SCHEDULE_LOCKED | Cannot replace schedule with status 'queued' |
+| SCHEDULE_COMPLETED | Cannot replace schedule with status 'completed' |
+| DATABASE_ERROR | SQLite operation failed |
+
+#### Duplicate Handling (UPSERT)
+
+| Existing Status | Action |
+|-----------------|--------|
+| (none) | INSERT new |
+| draft | UPDATE (replace) |
+| approved | UPDATE (replace) |
+| queued | REJECT with SCHEDULE_LOCKED |
+| completed | REJECT with SCHEDULE_COMPLETED |
+
+---
+
 ## Tool Usage by Phase
 
 ### Phase 1 - Preflight (3 tools - optimized)

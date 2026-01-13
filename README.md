@@ -83,14 +83,14 @@ The skill uses an MCP server (`eros-db`) for database access.
 2. Restart Claude Code
 3. Verify connection: `/mcp status`
 
-### Available Tools (14)
+### Available Tools (15)
 
 | Category | Tools | Purpose |
 |----------|-------|---------|
 | Creator | 5 | **Bundled profiles** (analytics + volume + rankings + vault + **persona**) |
 | Schedule | 5 | Volume config, triggers, persistence |
 | Caption | 3 | Batch retrieval, validation |
-| Config | 1 | 22-type send taxonomy |
+| Config | 2 | 22-type send taxonomy (full + lightweight) |
 
 > **v1.5.0 Optimization**: `get_creator_profile` now returns bundled response including analytics, volume assignment, content rankings, vault, and **persona**. Preflight MCP calls reduced from 7 to 3 (57% reduction).
 

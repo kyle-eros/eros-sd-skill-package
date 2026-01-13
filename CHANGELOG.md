@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **save_schedule v2.0.0** - Critical schema alignment fix
+  - Fixed 6 column name bugs (week_start_date→week_start, schedule_json→generation_metadata, validation_status→status, item_count→total_items, created_at→generated_at, added missing week_end)
+  - Added 4-layer validation (input, items, certificate freshness, database)
+  - Added status-aware UPSERT (draft/approved=replace, queued/completed=reject)
+  - Added 6 structured error codes (CREATOR_NOT_FOUND, VALIDATION_ERROR, INVALID_DATE, SCHEDULE_LOCKED, SCHEDULE_COMPLETED, DATABASE_ERROR)
+  - Added schedule hash for audit trail
+  - Added revision tracking in generation_metadata
+  - Added certificate_summary with age_seconds
+  - 20 new unit tests (all passing)
+
+---
+
 ## [2.0.0] - 2026-01-10
 
 ### Changed
