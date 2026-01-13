@@ -3503,25 +3503,57 @@ def get_send_type_captions(creator_id: str, send_type: str, limit: int = 10) -> 
 
 
 # =============================================================================
-# CAPTION VALIDATION v2.0.0 - send_type cache and helper functions
+# SHARED SEND_TYPES CACHE v2.0.0
+# Used by: get_send_types_constraints, validate_caption_structure
 # =============================================================================
 
 # Module-level cache for send_types (loaded once per session)
+# Extended in v2.0 to include constraint fields for get_send_types_constraints
 _SEND_TYPES_CACHE: dict[str, dict] = {}
+_SEND_TYPES_CACHE_META: dict[str, str] = {}  # cached_at, types_hash
 
 
 def _get_send_types_cache() -> dict[str, dict]:
-    """Load and cache all send_types. Called once per session."""
-    global _SEND_TYPES_CACHE
+    """Load and cache all send_types with constraint fields. Called once per session.
+
+    Returns dict keyed by send_type_key with all 9 constraint fields.
+    Used by both validate_caption_structure (needs category) and
+    get_send_types_constraints (needs all 9 fields).
+    """
+    global _SEND_TYPES_CACHE, _SEND_TYPES_CACHE_META
     if not _SEND_TYPES_CACHE:
         query = """
-            SELECT send_type_key, category, page_type_restriction
-            FROM send_types WHERE is_active = 1
+            SELECT send_type_key, category, page_type_restriction,
+                   max_per_day, max_per_week, min_hours_between,
+                   requires_media, requires_price, requires_flyer
+            FROM send_types
+            WHERE is_active = 1
+            ORDER BY category, sort_order
         """
         rows = db_query(query, ())
-        _SEND_TYPES_CACHE = {r["send_type_key"]: r for r in rows}
-        logger.info(f"Loaded {len(_SEND_TYPES_CACHE)} send_types into cache")
+        _SEND_TYPES_CACHE = {r["send_type_key"]: dict(r) for r in rows}
+
+        # Compute hash for pipeline integrity verification
+        keys_str = ','.join(sorted(_SEND_TYPES_CACHE.keys()))
+        types_hash = hashlib.sha256(keys_str.encode()).hexdigest()[:12]
+
+        _SEND_TYPES_CACHE_META = {
+            "cached_at": datetime.utcnow().isoformat() + "Z",
+            "types_hash": types_hash
+        }
+        logger.info(f"Loaded {len(_SEND_TYPES_CACHE)} send_types into cache (hash={types_hash})")
     return _SEND_TYPES_CACHE
+
+
+def _get_send_types_cache_meta() -> dict[str, str]:
+    """Get cache metadata (cached_at, types_hash). Ensures cache is loaded first."""
+    _get_send_types_cache()  # Ensure cache is populated
+    return _SEND_TYPES_CACHE_META
+
+
+def _is_send_types_cache_populated() -> bool:
+    """Check if cache was already populated (for source detection)."""
+    return bool(_SEND_TYPES_CACHE)
 
 
 def _validate_send_type(send_type: str) -> tuple[bool, dict | None, str | None]:
@@ -3781,55 +3813,119 @@ def validate_caption_structure(caption_text: str, send_type: str) -> dict:
 # CONFIG TOOLS (2)
 # ============================================================
 
+def _build_send_types_error_response(
+    error_code: str,
+    error_message: str,
+    page_type_filter: str = None
+) -> dict:
+    """Build consistent error response for send_types constraints."""
+    return {
+        "error": error_message,
+        "error_code": error_code,
+        "by_category": {"revenue": [], "engagement": [], "retention": []},
+        "all_send_type_keys": [],
+        "counts": {"revenue": 0, "engagement": 0, "retention": 0, "total": 0},
+        "page_type_filter": page_type_filter,
+        "metadata": {
+            "fetched_at": datetime.utcnow().isoformat() + "Z",
+            "tool_version": "2.0.0",
+            "source": "error",
+            "cached_at": None,
+            "types_hash": None,
+            "error": True
+        }
+    }
+
+
 @mcp.tool()
 def get_send_types_constraints(page_type: str = None) -> dict:
     """Returns minimal send type constraints for schedule generation.
 
     MCP Name: mcp__eros-db__get_send_types_constraints
+    Version: 2.0.0
 
     This is the PREFERRED tool for schedule generation. Returns only 9 essential
-    fields instead of 53, reducing response from ~34k chars to ~6k chars (~80% reduction).
+    constraint fields per send type, grouped by category for efficient allocation.
 
-    Use full get_send_types() only when you need description, strategy, weights,
-    channel configs, or other detailed fields.
+    Results are cached at module level for session lifetime. Use get_send_types()
+    only when you need description, strategy, weights, or channel configs.
 
     Args:
-        page_type: Optional filter ('paid' or 'free')
+        page_type: Optional filter ('paid', 'free', or None for all).
+                   Case-insensitive: 'PAID', 'Paid', 'paid' all work.
+                   Invalid values return error with INVALID_PAGE_TYPE code.
 
     Returns:
-        Minimal send type data with scheduling constraints only:
-        - send_type_key, category, page_type_restriction
-        - max_per_day, max_per_week, min_hours_between
-        - requires_media, requires_price, requires_flyer
+        Dict with send types grouped by category and convenience fields.
+
+    Response Schema:
+        {
+            "by_category": {
+                "revenue": [{send_type_key, category, page_type_restriction,
+                            max_per_day, max_per_week, min_hours_between,
+                            requires_media, requires_price, requires_flyer}, ...],
+                "engagement": [...],
+                "retention": [...]
+            },
+            "all_send_type_keys": ["ppv_unlock", "bump_normal", ...],
+            "counts": {"revenue": 9, "engagement": 9, "retention": 4, "total": 22},
+            "page_type_filter": "paid" | "free" | null,
+            "metadata": {
+                "fetched_at": "ISO timestamp",
+                "tool_version": "2.0.0",
+                "source": "cache" | "database",
+                "cached_at": "ISO timestamp" | null,
+                "types_hash": "12-char hash for ValidationCertificate"
+            }
+        }
+
+    Error Response:
+        Same schema with error/error_code fields and empty by_category.
+        Error codes: INVALID_PAGE_TYPE, INTERNAL_ERROR
+
+    Example:
+        get_send_types_constraints(page_type="paid")
+        # Returns constraints for paid pages (excludes free-only types like ppv_wall)
     """
     logger.info(f"get_send_types_constraints: page_type={page_type}")
+
     try:
-        # Select ONLY the 9 essential fields for schedule generation
-        query = """
-            SELECT
-                send_type_key,
-                category,
-                page_type_restriction,
-                max_per_day,
-                max_per_week,
-                min_hours_between,
-                requires_media,
-                requires_price,
-                requires_flyer
-            FROM send_types
-            WHERE is_active = 1
-        """
+        # =========================================================================
+        # INPUT VALIDATION: Case-normalize, then fail-fast on invalid
+        # =========================================================================
+        original_page_type = page_type
+        if page_type is not None:
+            page_type = str(page_type).lower().strip()
+            if page_type not in ('paid', 'free'):
+                return _build_send_types_error_response(
+                    error_code="INVALID_PAGE_TYPE",
+                    error_message=f"Invalid page_type: '{original_page_type}'. Valid values: 'paid', 'free', or null",
+                    page_type_filter=original_page_type
+                )
 
+        # =========================================================================
+        # FETCH FROM CACHE (or populate cache on first call)
+        # =========================================================================
+        cache_hit = _is_send_types_cache_populated()
+        cache = _get_send_types_cache()
+        cache_meta = _get_send_types_cache_meta()
+
+        # Convert cache dict to ordered list (maintains category, sort_order from query)
+        all_types = list(cache.values())
+
+        # =========================================================================
+        # FILTER BY PAGE TYPE
+        # =========================================================================
         if page_type == 'free':
-            query += " AND page_type_restriction IN ('both', 'free')"
+            types = [t for t in all_types if t['page_type_restriction'] in ('both', 'free')]
         elif page_type == 'paid':
-            query += " AND page_type_restriction IN ('both', 'paid')"
+            types = [t for t in all_types if t['page_type_restriction'] in ('both', 'paid')]
+        else:
+            types = all_types
 
-        query += " ORDER BY category, sort_order"
-
-        types = db_query(query, tuple())
-
-        # Group by category for easy lookup
+        # =========================================================================
+        # GROUP BY CATEGORY
+        # =========================================================================
         by_category = {
             "revenue": [],
             "engagement": [],
@@ -3840,18 +3936,37 @@ def get_send_types_constraints(page_type: str = None) -> dict:
             if cat in by_category:
                 by_category[cat].append(t)
 
+        # =========================================================================
+        # BUILD RESPONSE
+        # =========================================================================
+        all_keys = [t['send_type_key'] for t in types]
+
         return {
-            "send_types": types,
             "by_category": by_category,
-            "total": len(types),
+            "all_send_type_keys": all_keys,
+            "counts": {
+                "revenue": len(by_category["revenue"]),
+                "engagement": len(by_category["engagement"]),
+                "retention": len(by_category["retention"]),
+                "total": len(types)
+            },
             "page_type_filter": page_type,
-            "fields_returned": 9,
-            "_optimization_note": "Lightweight view (9 fields vs 53). Use get_send_types for full details."
+            "metadata": {
+                "fetched_at": datetime.utcnow().isoformat() + "Z",
+                "tool_version": "2.0.0",
+                "source": "cache" if cache_hit else "database",
+                "cached_at": cache_meta.get("cached_at") if cache_hit else None,
+                "types_hash": cache_meta.get("types_hash")
+            }
         }
 
     except Exception as e:
         logger.error(f"get_send_types_constraints error: {e}")
-        return {"error": str(e), "send_types": []}
+        return _build_send_types_error_response(
+            error_code="INTERNAL_ERROR",
+            error_message=str(e),
+            page_type_filter=page_type
+        )
 
 
 @mcp.tool()
