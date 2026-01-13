@@ -12,8 +12,8 @@ import json
 import sys
 from pathlib import Path
 
-# Add mcp_server to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent.parent / "mcp_server"))
+# Add project root to path for mcp_server package imports
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 
 class TestGetActiveVolumeTriggers:
@@ -29,7 +29,7 @@ class TestGetActiveVolumeTriggers:
 
     def test_returns_error_for_empty_creator_id(self):
         """Empty creator_id should return error."""
-        from main import get_active_volume_triggers
+        from mcp_server.main import get_active_volume_triggers
 
         result = get_active_volume_triggers("")
         assert "error" in result
@@ -39,11 +39,11 @@ class TestGetActiveVolumeTriggers:
 
     def test_returns_error_for_unknown_creator(self, mock_db_connection):
         """Unknown creator should return error."""
-        from main import get_active_volume_triggers
+        from mcp_server.main import get_active_volume_triggers
 
         mock_db_connection.execute.return_value.fetchone.return_value = None
 
-        with patch("main.get_db_connection", return_value=mock_db_connection):
+        with patch("mcp_server.main.get_db_connection", return_value=mock_db_connection):
             result = get_active_volume_triggers("unknown_creator")
 
         assert "error" in result
@@ -51,7 +51,7 @@ class TestGetActiveVolumeTriggers:
 
     def test_response_has_required_fields(self, mock_db_connection):
         """Response should have all required fields."""
-        from main import get_active_volume_triggers
+        from mcp_server.main import get_active_volume_triggers
 
         mock_db_connection.execute.return_value.fetchone.side_effect = [
             ("cr_123", "testpage", 10000, "paid", "STANDARD"),  # Creator row
@@ -65,7 +65,7 @@ class TestGetActiveVolumeTriggers:
              "2026-01-20", "2026-01-10", '{}', 0, None, 1, "2026-01-10", 10, 0, 0)
         ]
 
-        with patch("main.get_db_connection", return_value=mock_db_connection):
+        with patch("mcp_server.main.get_db_connection", return_value=mock_db_connection):
             result = get_active_volume_triggers("test_creator")
 
         # Core fields
@@ -83,7 +83,7 @@ class TestGetActiveVolumeTriggers:
 
     def test_compound_multiplier_calculated(self, mock_db_connection):
         """Compound multiplier should be calculated from triggers."""
-        from main import get_active_volume_triggers
+        from mcp_server.main import get_active_volume_triggers
 
         mock_db_connection.execute.return_value.fetchone.side_effect = [
             ("cr_123", "testpage", 10000, "paid", "STANDARD"),
@@ -99,7 +99,7 @@ class TestGetActiveVolumeTriggers:
              "2026-01-20", "2026-01-10", '{}', 0, None, 1, "2026-01-10", 10, 0, 0)
         ]
 
-        with patch("main.get_db_connection", return_value=mock_db_connection):
+        with patch("mcp_server.main.get_db_connection", return_value=mock_db_connection):
             result = get_active_volume_triggers("test_creator")
 
         assert result["compound_multiplier"] == pytest.approx(1.02, rel=1e-2)
@@ -107,7 +107,7 @@ class TestGetActiveVolumeTriggers:
 
     def test_creator_context_populated(self, mock_db_connection):
         """Creator context should have fan_count and tier."""
-        from main import get_active_volume_triggers
+        from mcp_server.main import get_active_volume_triggers
 
         # Create separate mock for each execute call
         mock_creator_result = MagicMock()
@@ -126,7 +126,7 @@ class TestGetActiveVolumeTriggers:
             mock_diag_result,  # Zero triggers diagnostics
         ]
 
-        with patch("main.get_db_connection", return_value=mock_db_connection):
+        with patch("mcp_server.main.get_db_connection", return_value=mock_db_connection):
             result = get_active_volume_triggers("test_creator")
 
         # Check we got a valid response (not an error)
@@ -147,7 +147,7 @@ class TestBackwardCompatibility:
 
     def test_old_consumer_pattern_works(self, mock_db_connection):
         """Old code pattern: triggers = response.get('triggers', [])"""
-        from main import get_active_volume_triggers
+        from mcp_server.main import get_active_volume_triggers
 
         mock_db_connection.execute.return_value.fetchone.side_effect = [
             ("cr_123", "testpage", 10000, "paid", "STANDARD"),
@@ -161,7 +161,7 @@ class TestBackwardCompatibility:
              "2026-01-20", "2026-01-10", '{}', 0, None, 1, "2026-01-10", 10, 0, 0)
         ]
 
-        with patch("main.get_db_connection", return_value=mock_db_connection):
+        with patch("mcp_server.main.get_db_connection", return_value=mock_db_connection):
             response = get_active_volume_triggers("test_creator")
 
         # OLD consumer code pattern
@@ -178,14 +178,14 @@ class TestBackwardCompatibility:
 
     def test_count_at_root_level(self, mock_db_connection):
         """count field must be at root level."""
-        from main import get_active_volume_triggers
+        from mcp_server.main import get_active_volume_triggers
 
         mock_db_connection.execute.return_value.fetchone.side_effect = [
             ("cr_123", "testpage", 10000, "paid", "STANDARD"),
         ]
         mock_db_connection.execute.return_value.fetchall.return_value = []
 
-        with patch("main.get_db_connection", return_value=mock_db_connection):
+        with patch("mcp_server.main.get_db_connection", return_value=mock_db_connection):
             response = get_active_volume_triggers("test_creator")
 
         assert "count" in response

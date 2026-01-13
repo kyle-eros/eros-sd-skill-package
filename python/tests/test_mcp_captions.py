@@ -19,8 +19,8 @@ import sys
 from datetime import datetime, timedelta
 from unittest.mock import patch, MagicMock
 
-# Add mcp_server to path for imports
-sys.path.insert(0, '/Users/kylemerriman/Developer/eros-sd-skill-package/mcp_server')
+# Add project root to path for mcp_server package imports
+sys.path.insert(0, '/Users/kylemerriman/Developer/eros-sd-skill-package')
 
 
 # =============================================================================
@@ -30,14 +30,14 @@ sys.path.insert(0, '/Users/kylemerriman/Developer/eros-sd-skill-package/mcp_serv
 @pytest.fixture
 def mock_db_query():
     """Mock db_query to return controlled test data."""
-    with patch('main.db_query') as mock:
+    with patch('mcp_server.main.db_query') as mock:
         yield mock
 
 
 @pytest.fixture
 def mock_resolve_creator():
     """Mock resolve_creator_id to return found creator."""
-    with patch('main.resolve_creator_id') as mock:
+    with patch('mcp_server.main.resolve_creator_id') as mock:
         mock.return_value = {"found": True, "creator_id": "test_creator_123"}
         yield mock
 
@@ -45,7 +45,7 @@ def mock_resolve_creator():
 @pytest.fixture
 def mock_validate_creator():
     """Mock validate_creator_id to return valid."""
-    with patch('main.validate_creator_id') as mock:
+    with patch('mcp_server.main.validate_creator_id') as mock:
         mock.return_value = (True, "test_creator")
         yield mock
 
@@ -104,7 +104,7 @@ class TestInputValidation:
 
     def test_empty_creator_id(self):
         """Empty creator_id returns INVALID_CREATOR_ID error."""
-        from main import get_batch_captions_by_content_types
+        from mcp_server.main import get_batch_captions_by_content_types
         result = get_batch_captions_by_content_types("", ["lingerie"])
         assert result["error_code"] == "INVALID_CREATOR_ID"
         assert result["captions_by_type"] == {}
@@ -113,14 +113,14 @@ class TestInputValidation:
 
     def test_invalid_creator_id_format(self, mock_validate_creator):
         """Invalid creator_id format returns INVALID_CREATOR_ID_FORMAT error."""
-        from main import get_batch_captions_by_content_types
+        from mcp_server.main import get_batch_captions_by_content_types
         mock_validate_creator.return_value = (False, "Invalid characters")
         result = get_batch_captions_by_content_types("invalid@id!", ["lingerie"])
         assert result["error_code"] == "INVALID_CREATOR_ID_FORMAT"
 
     def test_creator_not_found(self, mock_validate_creator, mock_resolve_creator):
         """Non-existent creator returns CREATOR_NOT_FOUND error."""
-        from main import get_batch_captions_by_content_types
+        from mcp_server.main import get_batch_captions_by_content_types
         mock_validate_creator.return_value = (True, "nonexistent")
         mock_resolve_creator.return_value = {"found": False}
         result = get_batch_captions_by_content_types("nonexistent", ["lingerie"])
@@ -128,26 +128,26 @@ class TestInputValidation:
 
     def test_empty_content_types(self):
         """Empty content_types list returns EMPTY_CONTENT_TYPES error."""
-        from main import get_batch_captions_by_content_types
+        from mcp_server.main import get_batch_captions_by_content_types
         result = get_batch_captions_by_content_types("creator", [])
         assert result["error_code"] == "EMPTY_CONTENT_TYPES"
 
     def test_content_types_not_list(self):
         """Non-list content_types returns INVALID_CONTENT_TYPES error."""
-        from main import get_batch_captions_by_content_types
+        from mcp_server.main import get_batch_captions_by_content_types
         result = get_batch_captions_by_content_types("creator", "lingerie")
         assert result["error_code"] == "INVALID_CONTENT_TYPES"
 
     def test_content_types_limit_exceeded(self):
         """More than 50 content types returns CONTENT_TYPES_LIMIT_EXCEEDED error."""
-        from main import get_batch_captions_by_content_types
+        from mcp_server.main import get_batch_captions_by_content_types
         types = [f"type_{i}" for i in range(51)]
         result = get_batch_captions_by_content_types("creator", types)
         assert result["error_code"] == "CONTENT_TYPES_LIMIT_EXCEEDED"
 
     def test_invalid_schedulable_type(self, mock_validate_creator, mock_resolve_creator):
         """Invalid schedulable_type returns INVALID_SCHEDULABLE_TYPE error."""
-        from main import get_batch_captions_by_content_types
+        from mcp_server.main import get_batch_captions_by_content_types
         result = get_batch_captions_by_content_types(
             "creator", ["lingerie"], schedulable_type="invalid"
         )
@@ -164,7 +164,7 @@ class TestHappyPath:
     def test_single_content_type(self, mock_validate_creator, mock_resolve_creator,
                                   mock_db_query, sample_caption_rows):
         """Single content type returns captions with all fields."""
-        from main import get_batch_captions_by_content_types
+        from mcp_server.main import get_batch_captions_by_content_types
         mock_db_query.return_value = sample_caption_rows
 
         result = get_batch_captions_by_content_types("creator", ["lingerie"])
@@ -178,7 +178,7 @@ class TestHappyPath:
     def test_multiple_content_types(self, mock_validate_creator, mock_resolve_creator,
                                      mock_db_query, sample_caption_rows):
         """Multiple content types returns captions grouped by type."""
-        from main import get_batch_captions_by_content_types
+        from mcp_server.main import get_batch_captions_by_content_types
         shower_rows = [dict(r, content_type="shower") for r in sample_caption_rows]
         mock_db_query.return_value = sample_caption_rows + shower_rows
 
@@ -191,7 +191,7 @@ class TestHappyPath:
     def test_limit_clamping_low(self, mock_validate_creator, mock_resolve_creator,
                                  mock_db_query, sample_caption_rows):
         """limit_per_type below 1 is clamped to 1."""
-        from main import get_batch_captions_by_content_types
+        from mcp_server.main import get_batch_captions_by_content_types
         mock_db_query.return_value = sample_caption_rows[:1]
 
         result = get_batch_captions_by_content_types("creator", ["lingerie"], limit_per_type=0)
@@ -200,7 +200,7 @@ class TestHappyPath:
     def test_limit_clamping_high(self, mock_validate_creator, mock_resolve_creator,
                                   mock_db_query, sample_caption_rows):
         """limit_per_type above 20 is clamped to 20."""
-        from main import get_batch_captions_by_content_types
+        from mcp_server.main import get_batch_captions_by_content_types
         mock_db_query.return_value = sample_caption_rows
 
         result = get_batch_captions_by_content_types("creator", ["lingerie"], limit_per_type=100)
@@ -209,7 +209,7 @@ class TestHappyPath:
     def test_with_schedulable_type(self, mock_validate_creator, mock_resolve_creator,
                                     mock_db_query, sample_caption_rows):
         """schedulable_type filter is applied correctly."""
-        from main import get_batch_captions_by_content_types
+        from mcp_server.main import get_batch_captions_by_content_types
         mock_db_query.return_value = sample_caption_rows
 
         result = get_batch_captions_by_content_types(
@@ -228,7 +228,7 @@ class TestPerCreatorFreshness:
     def test_creator_freshness_available(self, mock_validate_creator, mock_resolve_creator,
                                           mock_db_query, sample_caption_rows):
         """Per-creator freshness fields populated when data exists."""
-        from main import get_batch_captions_by_content_types
+        from mcp_server.main import get_batch_captions_by_content_types
         mock_db_query.return_value = sample_caption_rows
 
         result = get_batch_captions_by_content_types("creator", ["lingerie"])
@@ -242,7 +242,7 @@ class TestPerCreatorFreshness:
     def test_creator_freshness_null(self, mock_validate_creator, mock_resolve_creator,
                                      mock_db_query, sample_caption_rows):
         """Freshness fields handle NULL creator data gracefully."""
-        from main import get_batch_captions_by_content_types
+        from mcp_server.main import get_batch_captions_by_content_types
         mock_db_query.return_value = sample_caption_rows
 
         result = get_batch_captions_by_content_types("creator", ["lingerie"])
@@ -256,7 +256,7 @@ class TestPerCreatorFreshness:
     def test_freshness_sorting(self, mock_validate_creator, mock_resolve_creator,
                                 mock_db_query, sample_caption_rows):
         """Captions sorted by creator freshness (never-used first)."""
-        from main import get_batch_captions_by_content_types
+        from mcp_server.main import get_batch_captions_by_content_types
         mock_db_query.return_value = list(reversed(sample_caption_rows))
 
         result = get_batch_captions_by_content_types("creator", ["lingerie"])
@@ -265,7 +265,7 @@ class TestPerCreatorFreshness:
     def test_days_since_computation(self, mock_validate_creator, mock_resolve_creator,
                                      mock_db_query):
         """days_since_creator_used computed correctly."""
-        from main import get_batch_captions_by_content_types
+        from mcp_server.main import get_batch_captions_by_content_types
         yesterday = (datetime.now() - timedelta(days=1)).isoformat()
         rows = [{
             "caption_id": 1, "caption_text": "Test", "category": "ppv",
@@ -296,7 +296,7 @@ class TestPoolStats:
     def test_pool_total_available(self, mock_validate_creator, mock_resolve_creator,
                                    mock_db_query, sample_caption_rows):
         """pool_stats.total_available reflects full pool size."""
-        from main import get_batch_captions_by_content_types
+        from mcp_server.main import get_batch_captions_by_content_types
         mock_db_query.return_value = sample_caption_rows
 
         result = get_batch_captions_by_content_types("creator", ["lingerie"])
@@ -307,7 +307,7 @@ class TestPoolStats:
     def test_pool_fresh_for_creator(self, mock_validate_creator, mock_resolve_creator,
                                      mock_db_query, sample_caption_rows):
         """pool_stats.fresh_for_creator counts unused captions."""
-        from main import get_batch_captions_by_content_types
+        from mcp_server.main import get_batch_captions_by_content_types
         mock_db_query.return_value = sample_caption_rows
 
         result = get_batch_captions_by_content_types("creator", ["lingerie"])
@@ -318,7 +318,7 @@ class TestPoolStats:
     def test_pool_has_more(self, mock_validate_creator, mock_resolve_creator,
                            mock_db_query, sample_caption_rows):
         """pool_stats.has_more indicates more captions available."""
-        from main import get_batch_captions_by_content_types
+        from mcp_server.main import get_batch_captions_by_content_types
         mock_db_query.return_value = sample_caption_rows
 
         result = get_batch_captions_by_content_types("creator", ["lingerie"])
@@ -337,7 +337,7 @@ class TestFiltering:
     def test_schedulable_type_ppv(self, mock_validate_creator, mock_resolve_creator,
                                    mock_db_query, sample_caption_rows):
         """schedulable_type='ppv' filters to PPV captions."""
-        from main import get_batch_captions_by_content_types
+        from mcp_server.main import get_batch_captions_by_content_types
         mock_db_query.return_value = sample_caption_rows
 
         result = get_batch_captions_by_content_types(
@@ -348,7 +348,7 @@ class TestFiltering:
     def test_schedulable_type_null(self, mock_validate_creator, mock_resolve_creator,
                                     mock_db_query, sample_caption_rows):
         """schedulable_type=None returns all types."""
-        from main import get_batch_captions_by_content_types
+        from mcp_server.main import get_batch_captions_by_content_types
         mock_db_query.return_value = sample_caption_rows
 
         result = get_batch_captions_by_content_types("creator", ["lingerie"])
@@ -357,7 +357,7 @@ class TestFiltering:
     def test_unknown_content_type(self, mock_validate_creator, mock_resolve_creator,
                                    mock_db_query):
         """Unknown content type returns empty captions list."""
-        from main import get_batch_captions_by_content_types
+        from mcp_server.main import get_batch_captions_by_content_types
         mock_db_query.return_value = []
 
         result = get_batch_captions_by_content_types("creator", ["nonexistent_type"])
@@ -376,7 +376,7 @@ class TestMetadataStructure:
     def test_metadata_block_present(self, mock_validate_creator, mock_resolve_creator,
                                      mock_db_query, sample_caption_rows):
         """Response includes full metadata block."""
-        from main import get_batch_captions_by_content_types
+        from mcp_server.main import get_batch_captions_by_content_types
         mock_db_query.return_value = sample_caption_rows
 
         result = get_batch_captions_by_content_types("creator", ["lingerie"])
@@ -392,7 +392,7 @@ class TestMetadataStructure:
     def test_hash_determinism(self, mock_validate_creator, mock_resolve_creator,
                                mock_db_query, sample_caption_rows):
         """Hashes are deterministic for same inputs."""
-        from main import get_batch_captions_by_content_types
+        from mcp_server.main import get_batch_captions_by_content_types
         mock_db_query.return_value = sample_caption_rows
 
         result1 = get_batch_captions_by_content_types("creator", ["lingerie"])
@@ -403,7 +403,7 @@ class TestMetadataStructure:
 
     def test_error_response_schema(self):
         """Error responses include all schema fields."""
-        from main import get_batch_captions_by_content_types
+        from mcp_server.main import get_batch_captions_by_content_types
         result = get_batch_captions_by_content_types("", [])
 
         assert "error" in result
@@ -426,7 +426,7 @@ class TestEdgeCases:
     def test_duplicate_content_types(self, mock_validate_creator, mock_resolve_creator,
                                       mock_db_query, sample_caption_rows):
         """Duplicate content types are deduplicated."""
-        from main import get_batch_captions_by_content_types
+        from mcp_server.main import get_batch_captions_by_content_types
         mock_db_query.return_value = sample_caption_rows
 
         result = get_batch_captions_by_content_types(
@@ -439,7 +439,7 @@ class TestEdgeCases:
     def test_no_active_captions(self, mock_validate_creator, mock_resolve_creator,
                                  mock_db_query):
         """Empty result when no active captions exist."""
-        from main import get_batch_captions_by_content_types
+        from mcp_server.main import get_batch_captions_by_content_types
         mock_db_query.return_value = []
 
         result = get_batch_captions_by_content_types("creator", ["lingerie"])

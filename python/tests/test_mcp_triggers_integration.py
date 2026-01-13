@@ -15,8 +15,8 @@ import sys
 import os
 import time
 
-# Add mcp_server to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent.parent / "mcp_server"))
+# Add project root to path for mcp_server package imports
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 
 @pytest.fixture
@@ -121,7 +121,7 @@ class TestRealDatabaseQueries:
 
         # Force module reload to pick up test DB
         import importlib
-        import main as main_module
+        import mcp_server.main as main_module
         importlib.reload(main_module)
 
         result = main_module.get_active_volume_triggers("test_creator")
@@ -136,7 +136,7 @@ class TestRealDatabaseQueries:
         monkeypatch.setenv("EROS_DB_PATH", test_db)
 
         import importlib
-        import main as main_module
+        import mcp_server.main as main_module
         importlib.reload(main_module)
 
         result = main_module.get_active_volume_triggers("test_creator")
@@ -158,7 +158,7 @@ class TestRealDatabaseQueries:
         monkeypatch.setenv("EROS_DB_PATH", test_db)
 
         import importlib
-        import main as main_module
+        import mcp_server.main as main_module
         importlib.reload(main_module)
 
         result = main_module.get_active_volume_triggers("test_creator")
@@ -171,7 +171,7 @@ class TestRealDatabaseQueries:
         monkeypatch.setenv("EROS_DB_PATH", test_db)
 
         import importlib
-        import main as main_module
+        import mcp_server.main as main_module
         importlib.reload(main_module)
 
         # Create creator with no triggers
@@ -194,7 +194,7 @@ class TestRealDatabaseQueries:
         monkeypatch.setenv("EROS_DB_PATH", test_db)
 
         import importlib
-        import main as main_module
+        import mcp_server.main as main_module
         importlib.reload(main_module)
 
         result = main_module.get_active_volume_triggers("test_creator")
@@ -213,7 +213,7 @@ class TestSaveVolumeTriggers:
         monkeypatch.setenv("EROS_DB_PATH", test_db)
 
         import importlib
-        import main as main_module
+        import mcp_server.main as main_module
         importlib.reload(main_module)
 
         result = main_module.save_volume_triggers("test_creator", [{
@@ -234,7 +234,7 @@ class TestSaveVolumeTriggers:
         monkeypatch.setenv("EROS_DB_PATH", test_db)
 
         import importlib
-        import main as main_module
+        import mcp_server.main as main_module
         importlib.reload(main_module)
 
         result = main_module.save_volume_triggers("test_creator", [
@@ -251,7 +251,7 @@ class TestSaveVolumeTriggers:
         monkeypatch.setenv("EROS_DB_PATH", test_db)
 
         import importlib
-        import main as main_module
+        import mcp_server.main as main_module
         importlib.reload(main_module)
 
         metrics = {
@@ -285,7 +285,7 @@ class TestSaveVolumeTriggers:
         monkeypatch.setenv("EROS_DB_PATH", test_db)
 
         import importlib
-        import main as main_module
+        import mcp_server.main as main_module
         importlib.reload(main_module)
 
         result = main_module.save_volume_triggers("test_creator", [])
@@ -298,7 +298,7 @@ class TestSaveVolumeTriggers:
         monkeypatch.setenv("EROS_DB_PATH", test_db)
 
         import importlib
-        import main as main_module
+        import mcp_server.main as main_module
         importlib.reload(main_module)
 
         result = main_module.save_volume_triggers("unknown_creator", [{
@@ -319,7 +319,7 @@ class TestOnConflictBehavior:
         monkeypatch.setenv("EROS_DB_PATH", test_db)
 
         import importlib
-        import main as main_module
+        import mcp_server.main as main_module
         importlib.reload(main_module)
 
         # First save - creates new trigger
@@ -350,7 +350,7 @@ class TestOnConflictBehavior:
         monkeypatch.setenv("EROS_DB_PATH", test_db)
 
         import importlib
-        import main as main_module
+        import mcp_server.main as main_module
         importlib.reload(main_module)
 
         # First save
@@ -390,7 +390,7 @@ class TestOnConflictBehavior:
         monkeypatch.setenv("EROS_DB_PATH", test_db)
 
         import importlib
-        import main as main_module
+        import mcp_server.main as main_module
         importlib.reload(main_module)
 
         # First save
@@ -438,7 +438,7 @@ class TestReturnSchema:
         monkeypatch.setenv("EROS_DB_PATH", test_db)
 
         import importlib
-        import main as main_module
+        import mcp_server.main as main_module
         importlib.reload(main_module)
 
         result = main_module.save_volume_triggers("test_creator", [{
@@ -459,7 +459,7 @@ class TestReturnSchema:
         monkeypatch.setenv("EROS_DB_PATH", test_db)
 
         import importlib
-        import main as main_module
+        import mcp_server.main as main_module
         importlib.reload(main_module)
 
         result = main_module.save_volume_triggers("test_creator", [{
@@ -482,7 +482,7 @@ class TestReturnSchema:
         monkeypatch.setenv("EROS_DB_PATH", test_db)
 
         import importlib
-        import main as main_module
+        import mcp_server.main as main_module
         importlib.reload(main_module)
 
         triggers = [{
@@ -506,7 +506,7 @@ class TestOverwriteWarnings:
         monkeypatch.setenv("EROS_DB_PATH", test_db)
 
         import importlib
-        import main as main_module
+        import mcp_server.main as main_module
         importlib.reload(main_module)
 
         # First: boost (>1.0)
@@ -534,7 +534,7 @@ class TestOverwriteWarnings:
         monkeypatch.setenv("EROS_DB_PATH", test_db)
 
         import importlib
-        import main as main_module
+        import mcp_server.main as main_module
         importlib.reload(main_module)
 
         # First: 1.0
@@ -560,7 +560,7 @@ class TestOverwriteWarnings:
         monkeypatch.setenv("EROS_DB_PATH", test_db)
 
         import importlib
-        import main as main_module
+        import mcp_server.main as main_module
         importlib.reload(main_module)
 
         # First: 1.10
@@ -589,7 +589,7 @@ class TestBatchWarnings:
         monkeypatch.setenv("EROS_DB_PATH", test_db)
 
         import importlib
-        import main as main_module
+        import mcp_server.main as main_module
         importlib.reload(main_module)
 
         # Create 21 triggers (exceeds threshold of 20)
@@ -613,7 +613,7 @@ class TestBatchWarnings:
         monkeypatch.setenv("EROS_DB_PATH", test_db)
 
         import importlib
-        import main as main_module
+        import mcp_server.main as main_module
         importlib.reload(main_module)
 
         # Create 3 triggers (under threshold)
@@ -639,7 +639,7 @@ class TestGetActiveVolumeTriggersNewFields:
         monkeypatch.setenv("EROS_DB_PATH", test_db)
 
         import importlib
-        import main as main_module
+        import mcp_server.main as main_module
         importlib.reload(main_module)
 
         result = main_module.get_active_volume_triggers("test_creator")
@@ -655,7 +655,7 @@ class TestGetActiveVolumeTriggersNewFields:
         monkeypatch.setenv("EROS_DB_PATH", test_db)
 
         import importlib
-        import main as main_module
+        import mcp_server.main as main_module
         importlib.reload(main_module)
 
         result = main_module.get_active_volume_triggers("test_creator")
@@ -669,7 +669,7 @@ class TestGetActiveVolumeTriggersNewFields:
         monkeypatch.setenv("EROS_DB_PATH", test_db)
 
         import importlib
-        import main as main_module
+        import mcp_server.main as main_module
         importlib.reload(main_module)
 
         result = main_module.get_active_volume_triggers("test_creator")

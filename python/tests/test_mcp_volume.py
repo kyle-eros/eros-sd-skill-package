@@ -21,10 +21,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-# Add mcp_server to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent.parent / "mcp_server"))
+# Add project root to path for mcp_server package imports
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from volume_utils import (
+from mcp_server.volume_utils import (
     TIERS,
     TIER_ORDER,
     DAY_NAMES,
@@ -77,7 +77,7 @@ class TestBasicFunctionality:
 
     def test_weekly_distribution_has_seven_days(self, mock_db_connection, mock_creator_row):
         """Weekly distribution must contain exactly 7 days."""
-        from main import get_volume_config
+        from mcp_server.main import get_volume_config
 
         # Mock the database
         mock_db_connection.execute.return_value.fetchone.side_effect = [
@@ -87,9 +87,9 @@ class TestBasicFunctionality:
         ]
         mock_db_connection.execute.return_value.fetchall.return_value = []
 
-        with patch("main.get_db_connection", return_value=mock_db_connection):
-            with patch("main.validate_creator_id", return_value=(True, "test_creator")):
-                with patch("main.resolve_creator_id", return_value={"found": True, "creator_id": "test_creator"}):
+        with patch("mcp_server.main.get_db_connection", return_value=mock_db_connection):
+            with patch("mcp_server.main.validate_creator_id", return_value=(True, "test_creator")):
+                with patch("mcp_server.main.resolve_creator_id", return_value={"found": True, "creator_id": "test_creator"}):
                     result = get_volume_config("test_creator", "2026-01-06")
 
         assert "error" not in result, f"Got error: {result.get('error')}"
@@ -102,7 +102,7 @@ class TestBasicFunctionality:
 
     def test_required_fields_present(self, mock_db_connection, mock_creator_row):
         """All required response fields must be present."""
-        from main import get_volume_config
+        from mcp_server.main import get_volume_config
 
         mock_db_connection.execute.return_value.fetchone.side_effect = [
             mock_creator_row,
@@ -111,9 +111,9 @@ class TestBasicFunctionality:
         ]
         mock_db_connection.execute.return_value.fetchall.return_value = []
 
-        with patch("main.get_db_connection", return_value=mock_db_connection):
-            with patch("main.validate_creator_id", return_value=(True, "test_creator")):
-                with patch("main.resolve_creator_id", return_value={"found": True, "creator_id": "test_creator"}):
+        with patch("mcp_server.main.get_db_connection", return_value=mock_db_connection):
+            with patch("mcp_server.main.validate_creator_id", return_value=(True, "test_creator")):
+                with patch("mcp_server.main.resolve_creator_id", return_value={"found": True, "creator_id": "test_creator"}):
                     result = get_volume_config("test_creator", "2026-01-06")
 
         required_fields = [
@@ -129,9 +129,9 @@ class TestBasicFunctionality:
 
     def test_invalid_week_start_format(self):
         """Invalid week_start format returns error."""
-        from main import get_volume_config
+        from mcp_server.main import get_volume_config
 
-        with patch("main.validate_creator_id", return_value=(True, "test")):
+        with patch("mcp_server.main.validate_creator_id", return_value=(True, "test")):
             result = get_volume_config("test", "2026/01/06")  # Wrong format
 
         assert "error" in result
@@ -139,9 +139,9 @@ class TestBasicFunctionality:
 
     def test_invalid_creator_id(self):
         """Invalid creator_id returns error."""
-        from main import get_volume_config
+        from mcp_server.main import get_volume_config
 
-        with patch("main.validate_creator_id", return_value=(False, "Invalid characters")):
+        with patch("mcp_server.main.validate_creator_id", return_value=(False, "Invalid characters")):
             result = get_volume_config("!!!invalid!!!", "2026-01-06")
 
         assert "error" in result
@@ -157,7 +157,7 @@ class TestTierFallbackChain:
 
     def test_tier_override_takes_precedence(self, mock_db_connection, mock_creator_row):
         """tier_override must override all other tier sources."""
-        from main import get_volume_config
+        from mcp_server.main import get_volume_config
 
         mock_db_connection.execute.return_value.fetchone.side_effect = [
             mock_creator_row,
@@ -166,9 +166,9 @@ class TestTierFallbackChain:
         ]
         mock_db_connection.execute.return_value.fetchall.return_value = []
 
-        with patch("main.get_db_connection", return_value=mock_db_connection):
-            with patch("main.validate_creator_id", return_value=(True, "test_creator")):
-                with patch("main.resolve_creator_id", return_value={"found": True, "creator_id": "test_creator"}):
+        with patch("mcp_server.main.get_db_connection", return_value=mock_db_connection):
+            with patch("mcp_server.main.validate_creator_id", return_value=(True, "test_creator")):
+                with patch("mcp_server.main.resolve_creator_id", return_value={"found": True, "creator_id": "test_creator"}):
                     result = get_volume_config(
                         "test_creator",
                         "2026-01-06",
@@ -181,7 +181,7 @@ class TestTierFallbackChain:
 
     def test_tier_override_invalid_tier_ignored(self, mock_db_connection, mock_creator_row):
         """Invalid tier_override should be ignored and fallback used."""
-        from main import get_volume_config
+        from mcp_server.main import get_volume_config
 
         mock_db_connection.execute.return_value.fetchone.side_effect = [
             mock_creator_row,
@@ -190,9 +190,9 @@ class TestTierFallbackChain:
         ]
         mock_db_connection.execute.return_value.fetchall.return_value = []
 
-        with patch("main.get_db_connection", return_value=mock_db_connection):
-            with patch("main.validate_creator_id", return_value=(True, "test_creator")):
-                with patch("main.resolve_creator_id", return_value={"found": True, "creator_id": "test_creator"}):
+        with patch("mcp_server.main.get_db_connection", return_value=mock_db_connection):
+            with patch("mcp_server.main.validate_creator_id", return_value=(True, "test_creator")):
+                with patch("mcp_server.main.resolve_creator_id", return_value={"found": True, "creator_id": "test_creator"}):
                     result = get_volume_config(
                         "test_creator",
                         "2026-01-06",
@@ -205,7 +205,7 @@ class TestTierFallbackChain:
 
     def test_volume_assignments_used_when_available(self, mock_db_connection, mock_creator_row):
         """Level 1: volume_assignments table is preferred source."""
-        from main import get_volume_config
+        from mcp_server.main import get_volume_config
 
         mock_db_connection.execute.return_value.fetchone.side_effect = [
             mock_creator_row,  # Creator row
@@ -214,9 +214,9 @@ class TestTierFallbackChain:
         ]
         mock_db_connection.execute.return_value.fetchall.return_value = []
 
-        with patch("main.get_db_connection", return_value=mock_db_connection):
-            with patch("main.validate_creator_id", return_value=(True, "test_creator")):
-                with patch("main.resolve_creator_id", return_value={"found": True, "creator_id": "test_creator"}):
+        with patch("mcp_server.main.get_db_connection", return_value=mock_db_connection):
+            with patch("mcp_server.main.validate_creator_id", return_value=(True, "test_creator")):
+                with patch("mcp_server.main.resolve_creator_id", return_value={"found": True, "creator_id": "test_creator"}):
                     result = get_volume_config("test_creator", "2026-01-06")
 
         assert result["tier"] == "HIGH_VALUE"
@@ -233,7 +233,7 @@ class TestTriggerSimulation:
 
     def test_trigger_overrides_bypass_db(self, mock_db_connection, mock_creator_row):
         """trigger_overrides should bypass DB lookup entirely."""
-        from main import get_volume_config
+        from mcp_server.main import get_volume_config
 
         mock_db_connection.execute.return_value.fetchone.side_effect = [
             mock_creator_row,
@@ -250,9 +250,9 @@ class TestTriggerSimulation:
             {"trigger_type": "CONTENT_HOT", "adjustment_multiplier": 1.1},
         ]
 
-        with patch("main.get_db_connection", return_value=mock_db_connection):
-            with patch("main.validate_creator_id", return_value=(True, "test_creator")):
-                with patch("main.resolve_creator_id", return_value={"found": True, "creator_id": "test_creator"}):
+        with patch("mcp_server.main.get_db_connection", return_value=mock_db_connection):
+            with patch("mcp_server.main.validate_creator_id", return_value=(True, "test_creator")):
+                with patch("mcp_server.main.resolve_creator_id", return_value={"found": True, "creator_id": "test_creator"}):
                     result = get_volume_config(
                         "test_creator",
                         "2026-01-06",
@@ -272,7 +272,7 @@ class TestTriggerSimulation:
 
     def test_empty_trigger_overrides_gives_no_triggers(self, mock_db_connection, mock_creator_row):
         """Empty trigger_overrides list should result in no triggers (bypass DB)."""
-        from main import get_volume_config
+        from mcp_server.main import get_volume_config
 
         mock_db_connection.execute.return_value.fetchone.side_effect = [
             mock_creator_row,
@@ -283,9 +283,9 @@ class TestTriggerSimulation:
             {"trigger_type": "DB_TRIGGER", "adjustment_multiplier": 1.5}
         ]
 
-        with patch("main.get_db_connection", return_value=mock_db_connection):
-            with patch("main.validate_creator_id", return_value=(True, "test_creator")):
-                with patch("main.resolve_creator_id", return_value={"found": True, "creator_id": "test_creator"}):
+        with patch("mcp_server.main.get_db_connection", return_value=mock_db_connection):
+            with patch("mcp_server.main.validate_creator_id", return_value=(True, "test_creator")):
+                with patch("mcp_server.main.resolve_creator_id", return_value={"found": True, "creator_id": "test_creator"}):
                     result = get_volume_config(
                         "test_creator",
                         "2026-01-06",
@@ -306,7 +306,7 @@ class TestCalendarAwareness:
 
     def test_new_years_day_holiday_boost(self, mock_db_connection, mock_creator_row):
         """New Year's Day (Jan 1) should get 1.30x holiday boost."""
-        from main import get_volume_config
+        from mcp_server.main import get_volume_config
 
         mock_db_connection.execute.return_value.fetchone.side_effect = [
             mock_creator_row,
@@ -316,9 +316,9 @@ class TestCalendarAwareness:
         mock_db_connection.execute.return_value.fetchall.return_value = []
 
         # Week starting Dec 28, 2025 includes Jan 1, 2026
-        with patch("main.get_db_connection", return_value=mock_db_connection):
-            with patch("main.validate_creator_id", return_value=(True, "test_creator")):
-                with patch("main.resolve_creator_id", return_value={"found": True, "creator_id": "test_creator"}):
+        with patch("mcp_server.main.get_db_connection", return_value=mock_db_connection):
+            with patch("mcp_server.main.validate_creator_id", return_value=(True, "test_creator")):
+                with patch("mcp_server.main.resolve_creator_id", return_value={"found": True, "creator_id": "test_creator"}):
                     result = get_volume_config("test_creator", "2025-12-29")
 
         # Find New Year's Day in calendar_boosts
@@ -332,7 +332,7 @@ class TestCalendarAwareness:
 
     def test_payday_boost_fifteenth(self, mock_db_connection, mock_creator_row):
         """15th of month should get 1.20x payday boost."""
-        from main import get_volume_config
+        from mcp_server.main import get_volume_config
 
         mock_db_connection.execute.return_value.fetchone.side_effect = [
             mock_creator_row,
@@ -342,9 +342,9 @@ class TestCalendarAwareness:
         mock_db_connection.execute.return_value.fetchall.return_value = []
 
         # Week starting Jan 12, 2026 includes Jan 15 (Thursday)
-        with patch("main.get_db_connection", return_value=mock_db_connection):
-            with patch("main.validate_creator_id", return_value=(True, "test_creator")):
-                with patch("main.resolve_creator_id", return_value={"found": True, "creator_id": "test_creator"}):
+        with patch("mcp_server.main.get_db_connection", return_value=mock_db_connection):
+            with patch("mcp_server.main.validate_creator_id", return_value=(True, "test_creator")):
+                with patch("mcp_server.main.resolve_creator_id", return_value={"found": True, "creator_id": "test_creator"}):
                     result = get_volume_config("test_creator", "2026-01-12")
 
         payday_boost = next(
@@ -357,7 +357,7 @@ class TestCalendarAwareness:
 
     def test_weekend_boost_applied(self, mock_db_connection, mock_creator_row):
         """Friday/Saturday/Sunday should have weekend_boost > 1.0."""
-        from main import get_volume_config
+        from mcp_server.main import get_volume_config
 
         mock_db_connection.execute.return_value.fetchone.side_effect = [
             mock_creator_row,
@@ -366,9 +366,9 @@ class TestCalendarAwareness:
         ]
         mock_db_connection.execute.return_value.fetchall.return_value = []
 
-        with patch("main.get_db_connection", return_value=mock_db_connection):
-            with patch("main.validate_creator_id", return_value=(True, "test_creator")):
-                with patch("main.resolve_creator_id", return_value={"found": True, "creator_id": "test_creator"}):
+        with patch("mcp_server.main.get_db_connection", return_value=mock_db_connection):
+            with patch("mcp_server.main.validate_creator_id", return_value=(True, "test_creator")):
+                with patch("mcp_server.main.resolve_creator_id", return_value={"found": True, "creator_id": "test_creator"}):
                     result = get_volume_config("test_creator", "2026-01-05")  # Monday start
 
         # Check weekend days have boost > 1.0
@@ -391,7 +391,7 @@ class TestTemporalContext:
 
     def test_past_week_detection(self, mock_db_connection, mock_creator_row):
         """Week entirely in the past should have week_type='past'."""
-        from main import get_volume_config
+        from mcp_server.main import get_volume_config
 
         mock_db_connection.execute.return_value.fetchone.side_effect = [
             mock_creator_row,
@@ -401,16 +401,16 @@ class TestTemporalContext:
         mock_db_connection.execute.return_value.fetchall.return_value = []
 
         # Use a week from 2020 which is definitely in the past
-        with patch("main.get_db_connection", return_value=mock_db_connection):
-            with patch("main.validate_creator_id", return_value=(True, "test_creator")):
-                with patch("main.resolve_creator_id", return_value={"found": True, "creator_id": "test_creator"}):
+        with patch("mcp_server.main.get_db_connection", return_value=mock_db_connection):
+            with patch("mcp_server.main.validate_creator_id", return_value=(True, "test_creator")):
+                with patch("mcp_server.main.resolve_creator_id", return_value={"found": True, "creator_id": "test_creator"}):
                     result = get_volume_config("test_creator", "2020-01-06")
 
         assert result["temporal_context"]["week_type"] == "past"
 
     def test_future_week_detection(self, mock_db_connection, mock_creator_row):
         """Week entirely in the future should have week_type='future'."""
-        from main import get_volume_config
+        from mcp_server.main import get_volume_config
 
         mock_db_connection.execute.return_value.fetchone.side_effect = [
             mock_creator_row,
@@ -420,9 +420,9 @@ class TestTemporalContext:
         mock_db_connection.execute.return_value.fetchall.return_value = []
 
         # Use a week far in the future
-        with patch("main.get_db_connection", return_value=mock_db_connection):
-            with patch("main.validate_creator_id", return_value=(True, "test_creator")):
-                with patch("main.resolve_creator_id", return_value={"found": True, "creator_id": "test_creator"}):
+        with patch("mcp_server.main.get_db_connection", return_value=mock_db_connection):
+            with patch("mcp_server.main.validate_creator_id", return_value=(True, "test_creator")):
+                with patch("mcp_server.main.resolve_creator_id", return_value={"found": True, "creator_id": "test_creator"}):
                     result = get_volume_config("test_creator", "2030-01-06")
 
         assert result["temporal_context"]["week_type"] == "future"
@@ -437,7 +437,7 @@ class TestHashComputation:
 
     def test_hash_format_correct(self, mock_db_connection, mock_creator_row):
         """Hash should be in format 'sha256:<16-hex-chars>'."""
-        from main import get_volume_config
+        from mcp_server.main import get_volume_config
 
         mock_db_connection.execute.return_value.fetchone.side_effect = [
             mock_creator_row,
@@ -446,9 +446,9 @@ class TestHashComputation:
         ]
         mock_db_connection.execute.return_value.fetchall.return_value = []
 
-        with patch("main.get_db_connection", return_value=mock_db_connection):
-            with patch("main.validate_creator_id", return_value=(True, "test_creator")):
-                with patch("main.resolve_creator_id", return_value={"found": True, "creator_id": "test_creator"}):
+        with patch("mcp_server.main.get_db_connection", return_value=mock_db_connection):
+            with patch("mcp_server.main.validate_creator_id", return_value=(True, "test_creator")):
+                with patch("mcp_server.main.resolve_creator_id", return_value={"found": True, "creator_id": "test_creator"}):
                     result = get_volume_config("test_creator", "2026-01-06")
 
         config_hash = result["metadata"]["volume_config_hash"]
@@ -460,7 +460,7 @@ class TestHashComputation:
 
     def test_hash_deterministic(self, mock_db_connection, mock_creator_row):
         """Same inputs should produce same hash."""
-        from main import get_volume_config
+        from mcp_server.main import get_volume_config
 
         def setup_mock():
             mock_db_connection.execute.return_value.fetchone.side_effect = [
@@ -472,9 +472,9 @@ class TestHashComputation:
 
         # First call
         setup_mock()
-        with patch("main.get_db_connection", return_value=mock_db_connection):
-            with patch("main.validate_creator_id", return_value=(True, "test_creator")):
-                with patch("main.resolve_creator_id", return_value={"found": True, "creator_id": "test_creator"}):
+        with patch("mcp_server.main.get_db_connection", return_value=mock_db_connection):
+            with patch("mcp_server.main.validate_creator_id", return_value=(True, "test_creator")):
+                with patch("mcp_server.main.resolve_creator_id", return_value={"found": True, "creator_id": "test_creator"}):
                     result1 = get_volume_config(
                         "test_creator",
                         "2026-01-06",
@@ -483,9 +483,9 @@ class TestHashComputation:
 
         # Second call with same parameters
         setup_mock()
-        with patch("main.get_db_connection", return_value=mock_db_connection):
-            with patch("main.validate_creator_id", return_value=(True, "test_creator")):
-                with patch("main.resolve_creator_id", return_value={"found": True, "creator_id": "test_creator"}):
+        with patch("mcp_server.main.get_db_connection", return_value=mock_db_connection):
+            with patch("mcp_server.main.validate_creator_id", return_value=(True, "test_creator")):
+                with patch("mcp_server.main.resolve_creator_id", return_value={"found": True, "creator_id": "test_creator"}):
                     result2 = get_volume_config(
                         "test_creator",
                         "2026-01-06",
@@ -540,7 +540,7 @@ class TestHealthOverride:
 
     def test_health_override_applied(self, mock_db_connection, mock_creator_row):
         """health_override should override calculated health status."""
-        from main import get_volume_config
+        from mcp_server.main import get_volume_config
 
         mock_db_connection.execute.return_value.fetchone.side_effect = [
             mock_creator_row,
@@ -557,9 +557,9 @@ class TestHealthOverride:
             "volume_adjustment": -1
         }
 
-        with patch("main.get_db_connection", return_value=mock_db_connection):
-            with patch("main.validate_creator_id", return_value=(True, "test_creator")):
-                with patch("main.resolve_creator_id", return_value={"found": True, "creator_id": "test_creator"}):
+        with patch("mcp_server.main.get_db_connection", return_value=mock_db_connection):
+            with patch("mcp_server.main.validate_creator_id", return_value=(True, "test_creator")):
+                with patch("mcp_server.main.resolve_creator_id", return_value={"found": True, "creator_id": "test_creator"}):
                     result = get_volume_config(
                         "test_creator",
                         "2026-01-06",
@@ -574,7 +574,7 @@ class TestHealthOverride:
 
     def test_health_override_affects_volumes(self, mock_db_connection, mock_creator_row):
         """Health volume_adjustment should affect calculated daily volumes."""
-        from main import get_volume_config
+        from mcp_server.main import get_volume_config
 
         mock_db_connection.execute.return_value.fetchone.side_effect = [
             mock_creator_row,
@@ -584,9 +584,9 @@ class TestHealthOverride:
         mock_db_connection.execute.return_value.fetchall.return_value = []
 
         # Get baseline without health override
-        with patch("main.get_db_connection", return_value=mock_db_connection):
-            with patch("main.validate_creator_id", return_value=(True, "test_creator")):
-                with patch("main.resolve_creator_id", return_value={"found": True, "creator_id": "test_creator"}):
+        with patch("mcp_server.main.get_db_connection", return_value=mock_db_connection):
+            with patch("mcp_server.main.validate_creator_id", return_value=(True, "test_creator")):
+                with patch("mcp_server.main.resolve_creator_id", return_value={"found": True, "creator_id": "test_creator"}):
                     baseline = get_volume_config(
                         "test_creator",
                         "2026-01-06",
@@ -602,9 +602,9 @@ class TestHealthOverride:
         mock_db_connection.execute.return_value.fetchall.return_value = []
 
         # With +2 volume adjustment (hypothetical healthy opportunity)
-        with patch("main.get_db_connection", return_value=mock_db_connection):
-            with patch("main.validate_creator_id", return_value=(True, "test_creator")):
-                with patch("main.resolve_creator_id", return_value={"found": True, "creator_id": "test_creator"}):
+        with patch("mcp_server.main.get_db_connection", return_value=mock_db_connection):
+            with patch("mcp_server.main.validate_creator_id", return_value=(True, "test_creator")):
+                with patch("mcp_server.main.resolve_creator_id", return_value={"found": True, "creator_id": "test_creator"}):
                     boosted = get_volume_config(
                         "test_creator",
                         "2026-01-06",
@@ -628,7 +628,7 @@ class TestIncludeTriggerBreakdown:
 
     def test_trigger_details_included_when_requested(self, mock_db_connection, mock_creator_row):
         """trigger_details should be populated when include_trigger_breakdown=True."""
-        from main import get_volume_config
+        from mcp_server.main import get_volume_config
 
         mock_db_connection.execute.return_value.fetchone.side_effect = [
             mock_creator_row,
@@ -646,9 +646,9 @@ class TestIncludeTriggerBreakdown:
             }
         ]
 
-        with patch("main.get_db_connection", return_value=mock_db_connection):
-            with patch("main.validate_creator_id", return_value=(True, "test_creator")):
-                with patch("main.resolve_creator_id", return_value={"found": True, "creator_id": "test_creator"}):
+        with patch("mcp_server.main.get_db_connection", return_value=mock_db_connection):
+            with patch("mcp_server.main.validate_creator_id", return_value=(True, "test_creator")):
+                with patch("mcp_server.main.resolve_creator_id", return_value={"found": True, "creator_id": "test_creator"}):
                     result = get_volume_config(
                         "test_creator",
                         "2026-01-06",
@@ -661,7 +661,7 @@ class TestIncludeTriggerBreakdown:
 
     def test_trigger_details_none_when_not_requested(self, mock_db_connection, mock_creator_row):
         """trigger_details should be None when include_trigger_breakdown=False."""
-        from main import get_volume_config
+        from mcp_server.main import get_volume_config
 
         mock_db_connection.execute.return_value.fetchone.side_effect = [
             mock_creator_row,
@@ -672,9 +672,9 @@ class TestIncludeTriggerBreakdown:
             {"trigger_type": "HIGH_PERFORMER", "adjustment_multiplier": 1.15}
         ]
 
-        with patch("main.get_db_connection", return_value=mock_db_connection):
-            with patch("main.validate_creator_id", return_value=(True, "test_creator")):
-                with patch("main.resolve_creator_id", return_value={"found": True, "creator_id": "test_creator"}):
+        with patch("mcp_server.main.get_db_connection", return_value=mock_db_connection):
+            with patch("mcp_server.main.validate_creator_id", return_value=(True, "test_creator")):
+                with patch("mcp_server.main.resolve_creator_id", return_value={"found": True, "creator_id": "test_creator"}):
                     result = get_volume_config(
                         "test_creator",
                         "2026-01-06",
@@ -693,7 +693,7 @@ class TestWeeklyDistributionStructure:
 
     def test_each_day_has_required_fields(self, mock_db_connection, mock_creator_row):
         """Each day in weekly_distribution must have all required fields."""
-        from main import get_volume_config
+        from mcp_server.main import get_volume_config
 
         mock_db_connection.execute.return_value.fetchone.side_effect = [
             mock_creator_row,
@@ -702,9 +702,9 @@ class TestWeeklyDistributionStructure:
         ]
         mock_db_connection.execute.return_value.fetchall.return_value = []
 
-        with patch("main.get_db_connection", return_value=mock_db_connection):
-            with patch("main.validate_creator_id", return_value=(True, "test_creator")):
-                with patch("main.resolve_creator_id", return_value={"found": True, "creator_id": "test_creator"}):
+        with patch("mcp_server.main.get_db_connection", return_value=mock_db_connection):
+            with patch("mcp_server.main.validate_creator_id", return_value=(True, "test_creator")):
+                with patch("mcp_server.main.resolve_creator_id", return_value={"found": True, "creator_id": "test_creator"}):
                     result = get_volume_config("test_creator", "2026-01-05")  # Monday
 
         required_day_fields = [
@@ -718,7 +718,7 @@ class TestWeeklyDistributionStructure:
 
     def test_dates_are_correct_sequence(self, mock_db_connection, mock_creator_row):
         """Dates in weekly_distribution should be a correct 7-day sequence."""
-        from main import get_volume_config
+        from mcp_server.main import get_volume_config
 
         mock_db_connection.execute.return_value.fetchone.side_effect = [
             mock_creator_row,
@@ -728,9 +728,9 @@ class TestWeeklyDistributionStructure:
         mock_db_connection.execute.return_value.fetchall.return_value = []
 
         week_start = "2026-01-05"  # Monday
-        with patch("main.get_db_connection", return_value=mock_db_connection):
-            with patch("main.validate_creator_id", return_value=(True, "test_creator")):
-                with patch("main.resolve_creator_id", return_value={"found": True, "creator_id": "test_creator"}):
+        with patch("mcp_server.main.get_db_connection", return_value=mock_db_connection):
+            with patch("mcp_server.main.validate_creator_id", return_value=(True, "test_creator")):
+                with patch("mcp_server.main.resolve_creator_id", return_value={"found": True, "creator_id": "test_creator"}):
                     result = get_volume_config("test_creator", week_start)
 
         expected_dates = get_week_dates(week_start)
@@ -743,7 +743,7 @@ class TestWeeklyDistributionStructure:
 
     def test_volumes_are_positive_integers(self, mock_db_connection, mock_creator_row):
         """All volume values should be positive integers."""
-        from main import get_volume_config
+        from mcp_server.main import get_volume_config
 
         mock_db_connection.execute.return_value.fetchone.side_effect = [
             mock_creator_row,
@@ -752,9 +752,9 @@ class TestWeeklyDistributionStructure:
         ]
         mock_db_connection.execute.return_value.fetchall.return_value = []
 
-        with patch("main.get_db_connection", return_value=mock_db_connection):
-            with patch("main.validate_creator_id", return_value=(True, "test_creator")):
-                with patch("main.resolve_creator_id", return_value={"found": True, "creator_id": "test_creator"}):
+        with patch("mcp_server.main.get_db_connection", return_value=mock_db_connection):
+            with patch("mcp_server.main.validate_creator_id", return_value=(True, "test_creator")):
+                with patch("mcp_server.main.resolve_creator_id", return_value={"found": True, "creator_id": "test_creator"}):
                     result = get_volume_config("test_creator", "2026-01-05")
 
         for day_name, day_data in result["weekly_distribution"].items():
