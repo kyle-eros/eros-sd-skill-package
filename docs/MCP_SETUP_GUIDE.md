@@ -77,8 +77,8 @@ The EROS Schedule Generator uses an MCP server (`eros-db`) to access the SQLite 
 
 | Tool | Description |
 |------|-------------|
-| `get_send_types` | 22-type taxonomy with constraints (full details) |
-| `get_send_types_constraints` | Lightweight constraints for schedule generation (**preferred**) |
+| `get_send_types` | 22-type taxonomy with 48 business columns (v2.0.0) |
+| `get_send_types_constraints` | Lightweight constraints for schedule generation (**preferred**, v2.0.0) |
 
 ### get_creator_profile Optimization
 
@@ -560,12 +560,15 @@ Key tables:
 
 ### Send Types Tools Comparison
 
-| Tool | Tokens | Fields | Use Case |
-|------|--------|--------|----------|
-| `get_send_types` | ~14,600 | 53 | Full details (rare) |
-| `get_send_types_constraints` | ~2,000 | 9 | **Schedule generation (always use)** |
+| Tool | Tokens | Fields | Use Case | Version |
+|------|--------|--------|----------|---------|
+| `get_send_types` | ~8,000 | 48 | Full details (rare) | v2.0.0 |
+| `get_send_types_constraints` | ~2,000 | 9 | **Schedule generation (always use)** | v2.0.0 |
 
-**Token Savings: 86% reduction (~12,500 tokens saved per call)**
+**Token Savings: 75% reduction (~6,000 tokens saved per call)**
+
+> **v2.0.0 Breaking Change**: `get_send_types` no longer returns redundant `send_types` flat array.
+> Use `by_category` for grouped access or `all_send_type_keys` for key list.
 
 ### When to Use Each Tool
 
@@ -575,11 +578,12 @@ Key tables:
 - Volume allocation decisions
 - Any context-sensitive operations
 
-**get_send_types** (full version):
+**get_send_types** (full version, v2.0.0):
 - Debugging send type configurations
 - Viewing descriptions, strategies, purposes
 - Channel configuration analysis
 - Weight/scoring adjustments
+- Returns 48 business columns (excludes internal lifecycle fields)
 
 ---
 
