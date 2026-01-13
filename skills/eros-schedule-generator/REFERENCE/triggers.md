@@ -1,8 +1,8 @@
 # Volume Triggers Reference
 
-**Version**: 6.0.0
-**MCP Tool Version**: 2.0.0
-**Updated**: 2026-01-10
+**Version**: 7.0.0
+**MCP Tool Version**: 3.0.0
+**Updated**: 2026-01-12
 
 ---
 
@@ -22,7 +22,7 @@ Detection uses **scale-aware thresholds** (conversion-first, not RPS-first):
 
 ---
 
-## Trigger Schema (v2.0)
+## Trigger Schema (v3.0)
 
 ```json
 {
@@ -34,12 +34,15 @@ Detection uses **scale-aware thresholds** (conversion-first, not RPS-first):
     "reason": "Conversion 7.2%",
     "expires_at": "2026-01-17T14:19:18Z",
     "detected_at": "2026-01-10T14:19:18Z",
+    "first_detected_at": "2026-01-03T14:19:18Z",
     "metrics_json": {"detected": {"conversion_rate": 7.2, "sends": 15}},
     "source": "database",
     "applied_count": 0,
     "last_applied_at": null,
+    "detection_count": 3,
     "days_until_expiry": 7,
-    "days_since_detected": 0
+    "days_since_detected": 0,
+    "days_since_first_detected": 7
 }
 ```
 
@@ -182,21 +185,58 @@ for trigger in triggers:
 
 | Tool | Purpose | Version |
 |------|---------|---------|
-| `get_active_volume_triggers` | Retrieve active triggers with compound calculation | 2.0.0 |
-| `save_volume_triggers` | Persist new trigger detections with validation | 2.0.0 |
+| `get_active_volume_triggers` | Retrieve active triggers with compound calculation | 3.0.0 |
+| `save_volume_triggers` | Persist new trigger detections with validation | 3.0.0 |
 
 ### save_volume_triggers Validation
 
 Required fields: `trigger_type`, `content_type`, `adjustment_multiplier`
 
+### `save_volume_triggers` Response (v3.0)
+
 ```json
 {
     "success": true,
-    "triggers_saved": 2,
+    "triggers_saved": 3,
+    "created_ids": [142, 143],
+    "updated_ids": [87],
+    "creator_id": "maya_hill",
     "creator_id_resolved": "abc123-uuid",
-    "warnings": ["trigger[0]: extreme multiplier 0.55 - verify intentional"]
+    "warnings": [
+        "trigger[0]: extreme multiplier 0.55 - verify intentional",
+        "direction flip detected (1.20 -> 0.85) for lingerie/HIGH_PERFORMER"
+    ],
+    "overwrite_warnings": [
+        {
+            "trigger_id": 87,
+            "content_type": "lingerie",
+            "trigger_type": "HIGH_PERFORMER",
+            "old_multiplier": 1.20,
+            "new_multiplier": 0.85,
+            "direction_flip": true,
+            "delta_percent": -29.2
+        }
+    ],
+    "metadata": {
+        "persisted_at": "2026-01-12T14:30:00.000Z",
+        "execution_ms": 23.5,
+        "triggers_hash": "sha256:a1b2c3d4e5f6"
+    }
 }
 ```
+
+### New Fields (v3.0)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `detection_count` | int | Number of times trigger re-detected (starts at 1) |
+| `first_detected_at` | string | Original detection timestamp (never changes) |
+| `days_since_first_detected` | int | Days since first detection |
+| `created_ids` | array | IDs of newly created triggers |
+| `updated_ids` | array | IDs of updated (re-detected) triggers |
+| `overwrite_warnings` | array | Direction flip and large delta warnings |
+| `metadata.execution_ms` | float | Tool execution time in milliseconds |
+| `metadata.triggers_hash` | string | Deterministic hash of persisted triggers |
 
 ---
 

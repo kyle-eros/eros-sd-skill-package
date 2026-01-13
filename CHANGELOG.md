@@ -20,6 +20,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.0.0] - 2026-01-12
+
+### Changed
+- **BREAKING (internal)**: `save_volume_triggers` return schema now includes `created_ids` and `updated_ids`
+- Replace `INSERT OR REPLACE` with `ON CONFLICT DO UPDATE` for trigger persistence
+- Unique index on volume_triggers changed from partial to full (required for ON CONFLICT)
+
+### Added
+- `detection_count` column: Tracks how many times a trigger has been re-detected
+- `first_detected_at` column: Preserves original detection timestamp
+- `overwrite_warnings` in save response: Direction flip and large delta detection
+- `metadata` block in save response: `persisted_at`, `execution_ms`, `triggers_hash`
+- Large batch warning when >20 triggers in single call
+- `days_since_first_detected` calculated field in get_active_volume_triggers
+- Explicit transaction control with BEGIN IMMEDIATE / COMMIT / ROLLBACK
+- 4-layer structure comments in save_volume_triggers
+- 14 new integration tests for v3.0.0 features
+
+### Fixed
+- Trigger re-detection no longer destroys history (detection_count preserved)
+- Original detection timestamp preserved on re-detection
+
+### Database Migration
+- `ALTER TABLE volume_triggers ADD COLUMN detection_count INTEGER DEFAULT 1`
+- `ALTER TABLE volume_triggers ADD COLUMN first_detected_at TEXT`
+- Backfill: `UPDATE volume_triggers SET first_detected_at = detected_at WHERE first_detected_at IS NULL`
+- Index change: `DROP INDEX idx_volume_triggers_natural_key` (partial) -> `CREATE UNIQUE INDEX` (full)
+
+---
+
 ## [2.0.0] - 2026-01-10
 
 ### Changed
