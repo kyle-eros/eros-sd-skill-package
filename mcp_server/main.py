@@ -3502,49 +3502,234 @@ def get_send_type_captions(creator_id: str, send_type: str, limit: int = 10) -> 
         return _build_send_type_error_response("DATABASE_ERROR", str(e), send_type)
 
 
+# =============================================================================
+# CAPTION VALIDATION v2.0.0 - send_type cache and helper functions
+# =============================================================================
+
+# Module-level cache for send_types (loaded once per session)
+_SEND_TYPES_CACHE: dict[str, dict] = {}
+
+
+def _get_send_types_cache() -> dict[str, dict]:
+    """Load and cache all send_types. Called once per session."""
+    global _SEND_TYPES_CACHE
+    if not _SEND_TYPES_CACHE:
+        query = """
+            SELECT send_type_key, category, page_type_restriction
+            FROM send_types WHERE is_active = 1
+        """
+        rows = db_query(query, ())
+        _SEND_TYPES_CACHE = {r["send_type_key"]: r for r in rows}
+        logger.info(f"Loaded {len(_SEND_TYPES_CACHE)} send_types into cache")
+    return _SEND_TYPES_CACHE
+
+
+def _validate_send_type(send_type: str) -> tuple[bool, dict | None, str | None]:
+    """Validate send_type and return (valid, send_type_row, error_code)."""
+    cache = _get_send_types_cache()
+    if send_type in cache:
+        return (True, cache[send_type], None)
+    return (False, None, "INVALID_SEND_TYPE")
+
+
+def _get_thresholds(category: str | None) -> dict:
+    """Get length thresholds for category."""
+    return CAPTION_LENGTH_THRESHOLDS.get(
+        category.lower() if category else "default",
+        CAPTION_LENGTH_THRESHOLDS["default"]
+    )
+
+
+def _score_length(length: int, thresholds: dict) -> tuple[int, list[str]]:
+    """Score caption length against thresholds. Returns (penalty, issues)."""
+    issues = []
+    penalty = 0
+
+    if length < thresholds["min"]:
+        penalty = 30
+        issues.append(f"Caption too short (min {thresholds['min']} chars for this category)")
+    elif length < thresholds["ideal_min"]:
+        penalty = 10
+        issues.append(f"Caption below ideal length (recommend {thresholds['ideal_min']}+ chars)")
+    elif length > thresholds["max"]:
+        penalty = 15
+        issues.append(f"Caption too long (max {thresholds['max']} chars)")
+    elif length > thresholds["ideal_max"]:
+        penalty = 5
+        issues.append(f"Caption above ideal length (recommend under {thresholds['ideal_max']} chars)")
+
+    return (penalty, issues)
+
+
+def _get_spam_patterns(category: str | None) -> list[tuple[str, int]]:
+    """Get spam patterns applicable to category."""
+    patterns = list(CAPTION_SPAM_PATTERNS["universal"])
+    cat_lower = category.lower() if category else ""
+    if cat_lower not in SALES_LANGUAGE_TOLERANT:
+        patterns.extend(CAPTION_SPAM_PATTERNS["non_revenue"])
+    return patterns
+
+
+def _build_validation_error_response(
+    error_code: str,
+    error_msg: str,
+    send_type: str,
+    **kwargs
+) -> dict:
+    """Build standardized error response for validate_caption_structure."""
+    return {
+        "error": error_msg,
+        "error_code": error_code,
+        "valid": False,
+        "score": None,
+        "send_type": send_type,
+        "category": None,
+        "caption_length": None,
+        "issues": [],
+        "recommendation": "REJECT",
+        "thresholds_applied": None,
+        "metadata": {
+            "fetched_at": datetime.utcnow().isoformat() + "Z",
+            "tool_version": "2.0.0",
+            "error": True
+        },
+        **kwargs
+    }
+
+
+def _build_validation_success_response(
+    score: int,
+    issues: list[str],
+    send_type: str,
+    category: str,
+    caption_length: int,
+    thresholds: dict,
+    cache_hit: bool,
+    start_time: float
+) -> dict:
+    """Build standardized success response for validate_caption_structure."""
+    return {
+        "valid": score >= CAPTION_SCORE_THRESHOLDS["review"],
+        "score": score,
+        "issues": issues,
+        "send_type": send_type,
+        "category": category,
+        "caption_length": caption_length,
+        "thresholds_applied": thresholds,
+        "recommendation": (
+            "PASS" if score >= CAPTION_SCORE_THRESHOLDS["pass"]
+            else "REVIEW" if score >= CAPTION_SCORE_THRESHOLDS["review"]
+            else "REJECT"
+        ),
+        "metadata": {
+            "fetched_at": datetime.utcnow().isoformat() + "Z",
+            "tool_version": "2.0.0",
+            "query_ms": round((time.time() - start_time) * 1000, 2),
+            "cache_hit": cache_hit
+        }
+    }
+
+
 @mcp.tool()
 def validate_caption_structure(caption_text: str, send_type: str) -> dict:
     """Validates caption structure against anti-patterization rules.
 
     MCP Name: mcp__eros-db__validate_caption_structure
+    Version: 2.0.0
+
+    This tool validates caption text for quality and returns a score with
+    actionable issues. Validation rules vary by send_type category:
+    - Revenue: Longer captions expected, sales language tolerated
+    - Engagement: Moderate length, organic feel preferred
+    - Retention: Personal tone, stricter spam detection
 
     Args:
-        caption_text: The caption text to validate
-        send_type: The intended send type
+        caption_text: The caption text to validate (required, max 2000 chars)
+        send_type: The intended send type from send_types table (required)
 
     Returns:
-        Validation result with score and issues
+        Success response:
+        {
+            "valid": bool,              # True if score >= 70
+            "score": int,               # Quality score 0-100
+            "issues": [str],            # List of specific issues found
+            "send_type": str,           # Echoed input
+            "category": str,            # Resolved category (revenue/engagement/retention)
+            "caption_length": int,      # Character count
+            "thresholds_applied": {     # Category-specific thresholds used
+                "min": int, "ideal_min": int, "ideal_max": int, "max": int
+            },
+            "recommendation": str,      # PASS (>=85) / REVIEW (70-84) / REJECT (<70)
+            "metadata": {...}
+        }
+
+        Error response (for invalid inputs):
+        {
+            "error": str,
+            "error_code": str,          # EMPTY_CAPTION, INVALID_SEND_TYPE, CAPTION_EXCEEDS_LIMIT
+            "valid": false,
+            "score": null,
+            ...
+        }
     """
-    logger.info(f"validate_caption_structure: send_type={send_type}, length={len(caption_text)}")
+    start_time = time.time()
+    cache_hit = bool(_SEND_TYPES_CACHE)  # True if cache already loaded
+
+    logger.info(f"validate_caption_structure: send_type={send_type}, "
+                f"length={len(caption_text) if caption_text else 0}")
+
+    # ==========================================================================
+    # Input Validation (Error responses for structural failures)
+    # ==========================================================================
+
+    # Check for empty caption
+    if caption_text is None or not caption_text.strip():
+        logger.warning("validate_caption_structure: empty caption")
+        return _build_validation_error_response(
+            "EMPTY_CAPTION",
+            "Caption text is required",
+            send_type
+        )
+
+    # Check for excessive length (guard against abuse)
+    if len(caption_text) > CAPTION_MAX_INPUT_LENGTH:
+        logger.warning(f"validate_caption_structure: caption exceeds {CAPTION_MAX_INPUT_LENGTH} chars")
+        return _build_validation_error_response(
+            "CAPTION_EXCEEDS_LIMIT",
+            f"Caption exceeds {CAPTION_MAX_INPUT_LENGTH} character limit",
+            send_type
+        )
+
+    # Validate send_type against database
+    is_valid, send_type_row, error_code = _validate_send_type(send_type)
+    if not is_valid:
+        valid_types = sorted(_get_send_types_cache().keys())
+        logger.warning(f"validate_caption_structure: invalid send_type '{send_type}'")
+        return _build_validation_error_response(
+            "INVALID_SEND_TYPE",
+            f"Invalid send_type: {send_type}",
+            send_type,
+            valid_send_types=valid_types
+        )
+
+    # ==========================================================================
+    # Validation Logic (Score responses for quality issues)
+    # ==========================================================================
+
+    category = send_type_row["category"]
+    thresholds = _get_thresholds(category)
+    caption_length = len(caption_text)
 
     issues = []
     score = 100
 
-    # Length validation
-    if len(caption_text) < 10:
-        issues.append("Caption too short (min 10 chars)")
-        score -= 30
-    elif len(caption_text) < 20:
-        issues.append("Caption very short (recommend 20+ chars)")
-        score -= 10
-    elif len(caption_text) > 500:
-        issues.append("Caption too long (max 500 chars)")
-        score -= 10
-    elif len(caption_text) > 300:
-        issues.append("Caption lengthy (recommend under 300 chars)")
-        score -= 5
+    # Length validation (category-aware)
+    length_penalty, length_issues = _score_length(caption_length, thresholds)
+    score -= length_penalty
+    issues.extend(length_issues)
 
-    # Spam pattern detection
-    spam_patterns = [
-        ("click here", 15),
-        ("limited time", 10),
-        ("act now", 15),
-        ("don't miss", 10),
-        ("hurry", 5),
-        ("exclusive offer", 10),
-        ("buy now", 15)
-    ]
-
+    # Spam pattern detection (category-aware)
+    spam_patterns = _get_spam_patterns(category)
     caption_lower = caption_text.lower()
     for pattern, penalty in spam_patterns:
         if pattern in caption_lower:
@@ -3577,16 +3762,19 @@ def validate_caption_structure(caption_text: str, send_type: str) -> dict:
         issues.append("All caps text")
         score -= 20
 
+    # Clamp score to valid range
     score = max(0, min(100, score))
 
-    return {
-        "valid": score >= 70,
-        "score": score,
-        "issues": issues,
-        "send_type": send_type,
-        "caption_length": len(caption_text),
-        "recommendation": "PASS" if score >= 85 else "REVIEW" if score >= 70 else "REJECT"
-    }
+    return _build_validation_success_response(
+        score=score,
+        issues=issues,
+        send_type=send_type,
+        category=category,
+        caption_length=caption_length,
+        thresholds=thresholds,
+        cache_hit=cache_hit,
+        start_time=start_time
+    )
 
 
 # ============================================================
