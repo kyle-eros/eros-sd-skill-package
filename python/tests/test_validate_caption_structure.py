@@ -5,11 +5,11 @@ Test Categories:
 - Error Responses (4 tests): Error schema, error codes, valid_send_types
 - Send Type Validation (4 tests): Cache load, cache hit, all types, invalid type
 - Category Rules (6 tests): Revenue/engagement/retention thresholds, spam tolerance
-- Scoring (4 tests): Length, spam, emoji, repetition penalties
+- Scoring (7 tests): Length, spam, emoji, repetition, high emoji, above-ideal, all-caps
 - Metadata (3 tests): Fields present, timing, version
 - Integration (2 tests): Full valid, full invalid
 
-Total: 28 tests
+Total: 31 tests
 Target: 90% line coverage, 85% branch coverage
 """
 
@@ -380,6 +380,43 @@ class TestScoring:
         result = validate_caption_structure(repetitive, "bump_normal")
 
         assert any("repeated words" in issue.lower() for issue in result["issues"])
+
+    def test_emoji_penalty_high_count(self, clear_cache, mock_db_query):
+        """6-10 emojis gets 5 point penalty (less severe than excessive)."""
+        from mcp_server.main import validate_caption_structure
+
+        # 7 emojis - in the "high" range (6-10), not "excessive" (>10)
+        moderate_emojis = "Check this out babe! 💕💕💕💕💕💕💕"
+        result = validate_caption_structure(moderate_emojis, "bump_normal")
+
+        # Should get "High emoji count" not "Excessive emojis"
+        assert any("high emoji count" in issue.lower() for issue in result["issues"])
+        assert not any("excessive emojis" in issue.lower() for issue in result["issues"])
+
+    def test_above_ideal_length_penalty(self, clear_cache, mock_db_query):
+        """Caption above ideal_max but below max gets 5 point penalty."""
+        from mcp_server.main import validate_caption_structure
+
+        # Engagement: ideal_max=150, max=250
+        # 200 chars is above ideal but below max
+        long_caption = "x" * 200
+        result = validate_caption_structure(long_caption, "bump_normal")
+
+        assert result["category"] == "engagement"
+        assert any("above ideal length" in issue.lower() for issue in result["issues"])
+        # Should NOT be "too long" (that's for exceeding max)
+        assert not any("too long" in issue.lower() for issue in result["issues"])
+
+    def test_all_caps_penalty(self, clear_cache, mock_db_query):
+        """All caps text over 20 chars gets 20 point penalty."""
+        from mcp_server.main import validate_caption_structure
+
+        # All caps, over 20 characters
+        all_caps = "THIS IS AN ALL CAPS MESSAGE FOR TESTING PURPOSES"
+        result = validate_caption_structure(all_caps, "bump_normal")
+
+        assert any("all caps" in issue.lower() for issue in result["issues"])
+        assert result["score"] <= 80  # 100 - 20 = 80 max
 
 
 # =============================================================================
