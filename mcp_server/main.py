@@ -2218,60 +2218,331 @@ def save_schedule(
     """Persists generated schedule with validation certificate.
 
     MCP Name: mcp__eros-db__save_schedule
+    Version: 2.0.0
+
+    CRITICAL FIX v2.0: Corrected column names per schedule_templates schema:
+    - week_start (NOT week_start_date)
+    - generation_metadata (NOT schedule_json)
+    - status (NOT validation_status)
+    - total_items (NOT item_count)
+    - generated_at (NOT created_at)
+    - week_end (required, was missing)
 
     Args:
-        creator_id: Creator identifier
+        creator_id: Creator identifier (creator_id or page_name)
         week_start: Week start date (YYYY-MM-DD)
-        items: List of schedule items
-        validation_certificate: Optional validation certificate
+        items: List of schedule items from Generator phase
+        validation_certificate: Optional ValidationCertificate from Validator phase
 
     Returns:
-        Result with schedule_id if successful
+        Success: schedule_id, status, metadata, certificate_summary, replaced info
+        Failure: error, error_code, validation_errors
+
+    Error Codes:
+        - CREATOR_NOT_FOUND: creator_id/page_name not in database
+        - VALIDATION_ERROR: items failed structural validation
+        - INVALID_DATE: week_start not in YYYY-MM-DD format
+        - SCHEDULE_LOCKED: cannot replace schedule with status 'queued'
+        - SCHEDULE_COMPLETED: cannot replace schedule with status 'completed'
+        - DATABASE_ERROR: SQLite operation failed
+
+    Duplicate Handling (UPSERT):
+        - draft/approved: UPDATE existing (returns replaced=true)
+        - queued: REJECT with SCHEDULE_LOCKED
+        - completed: REJECT with SCHEDULE_COMPLETED
     """
-    logger.info(f"save_schedule: creator_id={creator_id}, week_start={week_start}, items={len(items)}")
+    from volume_utils import (
+        validate_schedule_items,
+        validate_certificate_freshness,
+        compute_schedule_hash
+    )
+    import time
+    from datetime import datetime, timedelta
+
+    start_time = time.time()
+    warnings: list[str] = []
+
+    logger.info(f"save_schedule: creator_id={creator_id}, week_start={week_start}, items={len(items) if items else 0}")
+
+    # ==========================================================================
+    # LAYER 1: Input Validation
+    # ==========================================================================
+
+    if not creator_id or not str(creator_id).strip():
+        return {
+            "success": False,
+            "error": "creator_id is required",
+            "error_code": "VALIDATION_ERROR"
+        }
+
     try:
-        # Get actual creator_id
-        creator = db_query(
-            "SELECT creator_id FROM creators WHERE creator_id = ? OR page_name = ? LIMIT 1",
-            (creator_id, creator_id)
-        )
-        if not creator:
-            return {"error": f"Creator not found: {creator_id}", "success": False}
+        week_start_dt = datetime.strptime(week_start, "%Y-%m-%d")
+    except (ValueError, TypeError):
+        return {
+            "success": False,
+            "error": f"week_start must be YYYY-MM-DD format, got: {week_start}",
+            "error_code": "INVALID_DATE"
+        }
 
-        creator_pk = creator[0]['creator_id']
+    # ==========================================================================
+    # LAYER 2: Items Validation
+    # ==========================================================================
 
+    is_valid, validation_errors = validate_schedule_items(items)
+    if not is_valid:
+        return {
+            "success": False,
+            "error": "Items validation failed",
+            "error_code": "VALIDATION_ERROR",
+            "validation_errors": validation_errors,
+            "creator_id": creator_id
+        }
+
+    # ==========================================================================
+    # LAYER 3: Certificate Freshness (soft gate)
+    # ==========================================================================
+
+    is_fresh, freshness_error = validate_certificate_freshness(validation_certificate)
+    certificate_valid = is_fresh
+
+    if not is_fresh and freshness_error:
+        warnings.append(f"Certificate freshness: {freshness_error} - status downgraded to 'draft'")
+        logger.warning(f"save_schedule: certificate not fresh - {freshness_error}")
+
+    # Item count consistency check
+    if validation_certificate:
+        cert_item_count = validation_certificate.get("items_validated")
+        if cert_item_count is not None and cert_item_count != len(items):
+            warnings.append(f"Item count mismatch: certificate validated {cert_item_count}, received {len(items)}")
+
+    # ==========================================================================
+    # LAYER 4: Database Operations
+    # ==========================================================================
+
+    try:
         with get_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                INSERT INTO schedule_templates (
-                    creator_id, week_start_date, schedule_json,
-                    validation_status, item_count, created_at
-                ) VALUES (?, ?, ?, ?, ?, datetime('now'))
-            """, (
-                creator_pk,
-                week_start,
-                json.dumps({"items": items, "validation_certificate": validation_certificate}),
-                "validated" if validation_certificate else "pending",
-                len(items)
-            ))
-            schedule_id = cursor.lastrowid
-            conn.commit()
+            # Resolve creator_id
+            creator_row = conn.execute("""
+                SELECT creator_id FROM creators
+                WHERE creator_id = ? OR page_name = ?
+                LIMIT 1
+            """, (creator_id, creator_id)).fetchone()
 
-        logger.info(f"Schedule saved: id={schedule_id}")
+            if not creator_row:
+                return {
+                    "success": False,
+                    "error": f"Creator not found: {creator_id}",
+                    "error_code": "CREATOR_NOT_FOUND",
+                    "creator_id": creator_id
+                }
+
+            creator_pk = creator_row[0]
+
+            # Calculate week_end
+            week_end_dt = week_start_dt + timedelta(days=6)
+            week_end = week_end_dt.strftime("%Y-%m-%d")
+
+            # Check for existing schedule (status-aware UPSERT)
+            existing = conn.execute("""
+                SELECT template_id, status, generation_metadata
+                FROM schedule_templates
+                WHERE creator_id = ? AND week_start = ?
+            """, (creator_pk, week_start)).fetchone()
+
+            replaced = False
+            previous_template_id = None
+            previous_status = None
+            previous_hash = None
+
+            if existing:
+                previous_template_id = existing[0]
+                previous_status = existing[1]
+                previous_metadata_raw = existing[2]
+
+                # Extract previous hash for audit
+                if previous_metadata_raw:
+                    try:
+                        prev_meta = json.loads(previous_metadata_raw) if isinstance(previous_metadata_raw, str) else previous_metadata_raw
+                        previous_hash = prev_meta.get("schedule_hash")
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+
+                # Status-aware replacement rules
+                if previous_status in ("queued", "completed"):
+                    error_code = "SCHEDULE_LOCKED" if previous_status == "queued" else "SCHEDULE_COMPLETED"
+                    return {
+                        "success": False,
+                        "error": f"Cannot replace schedule with status '{previous_status}'",
+                        "error_code": error_code,
+                        "creator_id": creator_id,
+                        "week_start": week_start,
+                        "existing_template_id": previous_template_id,
+                        "existing_status": previous_status
+                    }
+                else:
+                    replaced = True
+                    logger.info(f"save_schedule: replacing template_id={previous_template_id} status={previous_status}")
+
+            # Compute schedule hash
+            schedule_hash = compute_schedule_hash(items)
+
+            # Determine status
+            if validation_certificate and certificate_valid:
+                cert_status = validation_certificate.get("validation_status", "").upper()
+                status = "approved" if cert_status == "APPROVED" else "draft"
+            else:
+                status = "draft"
+
+            # Build generation_metadata
+            generation_metadata = {
+                "items": items,
+                "schedule_hash": schedule_hash,
+                "item_count": len(items),
+                "generated_at": datetime.now().isoformat() + "Z"
+            }
+
+            if validation_certificate:
+                generation_metadata["validation_certificate"] = validation_certificate
+
+            if replaced:
+                generation_metadata["revision"] = {
+                    "replaced_at": datetime.now().isoformat() + "Z",
+                    "previous_template_id": previous_template_id,
+                    "previous_status": previous_status,
+                    "previous_hash": previous_hash
+                }
+
+            # Execute INSERT or UPDATE
+            cursor = conn.cursor()
+
+            if replaced:
+                cursor.execute("""
+                    UPDATE schedule_templates
+                    SET week_end = ?,
+                        generated_at = datetime('now'),
+                        total_items = ?,
+                        status = ?,
+                        generation_metadata = ?
+                    WHERE template_id = ?
+                """, (
+                    week_end,
+                    len(items),
+                    status,
+                    json.dumps(generation_metadata),
+                    previous_template_id
+                ))
+                schedule_id = previous_template_id
+            else:
+                cursor.execute("""
+                    INSERT INTO schedule_templates (
+                        creator_id,
+                        week_start,
+                        week_end,
+                        generated_at,
+                        total_items,
+                        status,
+                        generation_metadata
+                    ) VALUES (?, ?, ?, datetime('now'), ?, ?, ?)
+                """, (
+                    creator_pk,
+                    week_start,
+                    week_end,
+                    len(items),
+                    status,
+                    json.dumps(generation_metadata)
+                ))
+                schedule_id = cursor.lastrowid
+
+            conn.commit()
+            logger.info(f"Schedule saved: id={schedule_id}, status={status}, items={len(items)}, replaced={replaced}")
+
+            # ==========================================================================
+            # Build Response
+            # ==========================================================================
+
+            elapsed_ms = round((time.time() - start_time) * 1000, 2)
+
+            response = {
+                "success": True,
+                "schedule_id": schedule_id,
+                "template_id": schedule_id,  # Backwards compatibility
+                "items_saved": len(items),
+                "creator_id": creator_id,
+                "creator_id_resolved": creator_pk,
+                "week_start": week_start,
+                "week_end": week_end,
+                "status": status,
+                "has_certificate": validation_certificate is not None,
+                "metadata": {
+                    "saved_at": datetime.now().isoformat() + "Z",
+                    "query_ms": elapsed_ms,
+                    "schedule_hash": schedule_hash
+                }
+            }
+
+            # Certificate summary
+            if validation_certificate:
+                cert_age_seconds = None
+                ts = validation_certificate.get("validation_timestamp")
+                if ts:
+                    try:
+                        cert_time = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+                        cert_age_seconds = round((datetime.now(cert_time.tzinfo) - cert_time).total_seconds())
+                    except (ValueError, TypeError):
+                        pass
+
+                response["certificate_summary"] = {
+                    "validation_status": validation_certificate.get("validation_status"),
+                    "quality_score": validation_certificate.get("quality_score"),
+                    "items_validated": validation_certificate.get("items_validated"),
+                    "is_fresh": certificate_valid,
+                    "age_seconds": cert_age_seconds
+                }
+
+            # Replacement info
+            if replaced:
+                response["replaced"] = True
+                response["previous_template_id"] = previous_template_id
+                response["previous_status"] = previous_status
+                if previous_hash:
+                    response["metadata"]["previous_schedule_hash"] = previous_hash
+            else:
+                response["replaced"] = False
+
+            # Warnings
+            if warnings:
+                response["warnings"] = warnings
+
+            return response
+
+    except sqlite3.IntegrityError as e:
+        error_msg = str(e)
+        logger.error(f"save_schedule integrity error: {e}")
+
+        if "UNIQUE constraint" in error_msg:
+            return {
+                "success": False,
+                "error": f"Schedule already exists for {creator_id} week {week_start}",
+                "error_code": "DUPLICATE_SCHEDULE",
+                "creator_id": creator_id,
+                "week_start": week_start
+            }
 
         return {
-            "success": True,
-            "schedule_id": schedule_id,
-            "template_id": schedule_id,
-            "items_saved": len(items),
-            "creator_id": creator_id,
-            "week_start": week_start,
-            "has_certificate": validation_certificate is not None
+            "success": False,
+            "error": f"Integrity error: {error_msg}",
+            "error_code": "DATABASE_ERROR",
+            "creator_id": creator_id
         }
 
     except Exception as e:
         logger.error(f"save_schedule error: {e}")
-        return {"error": str(e), "success": False}
+        return {
+            "success": False,
+            "error": f"Database error: {str(e)}",
+            "error_code": "DATABASE_ERROR",
+            "creator_id": creator_id
+        }
 
 
 @mcp.tool()
