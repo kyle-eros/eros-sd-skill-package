@@ -2547,14 +2547,19 @@ def save_schedule(
 
 @mcp.tool()
 def save_volume_triggers(creator_id: str, triggers: list) -> dict:
-    """Persists detected volume triggers with validation.
+    """Persists detected volume triggers with validation and detection tracking.
 
     MCP Name: mcp__eros-db__save_volume_triggers
-    Version: 2.0.0
+    Version: 3.0.0
 
-    CRITICAL FIX v2.0: Uses correct column names per schema:
-    - adjustment_multiplier (NOT adjustment_value)
-    - detected_at (NOT created_at)
+    BREAKING CHANGE v3.0: Return schema now includes created_ids and updated_ids
+
+    Changes from v2.0:
+    - Replace INSERT OR REPLACE with ON CONFLICT DO UPDATE
+    - Add detection_count increment on re-detection
+    - Preserve first_detected_at on updates
+    - Add structured overwrite_warnings for direction flip and large delta
+    - Add metadata block with persisted_at, execution_ms, triggers_hash
 
     Args:
         creator_id: Creator identifier (creator_id or page_name)
@@ -2567,9 +2572,14 @@ def save_volume_triggers(creator_id: str, triggers: list) -> dict:
     Returns:
         dict with:
         - success: bool
-        - triggers_saved: int
+        - triggers_saved: int (total created + updated)
+        - created_ids: list[int] - trigger IDs for newly created triggers
+        - updated_ids: list[int] - trigger IDs for updated triggers
         - creator_id: echoed input
-        - warnings: list[str] if suspicious values detected
+        - creator_id_resolved: int - resolved creator PK
+        - warnings: list[str] if suspicious values detected (backward compatible)
+        - overwrite_warnings: list[dict] if direction flips or large deltas detected
+        - metadata: dict with persisted_at, execution_ms, triggers_hash
         - error: str if failed
         - validation_errors: list[str] if validation failed
 
@@ -2582,20 +2592,27 @@ def save_volume_triggers(creator_id: str, triggers: list) -> dict:
         - volume_utils.validate_trigger: Validation function
         - get_active_volume_triggers: Retrieve persisted triggers
     """
+    # Timing instrumentation
+    start_time = datetime.now()
+
     # CRITICAL: Use relative import (we're inside mcp_server/)
     from volume_utils import validate_trigger
 
     logger.info(f"save_volume_triggers: creator_id={creator_id}, triggers={len(triggers)}")
 
+    # ============================================================
+    # LAYER 1: INPUT - Validate creator_id, empty list check
+    # ============================================================
     if not triggers:
         return {
             "success": True,
             "triggers_saved": 0,
+            "created_ids": [],
+            "updated_ids": [],
             "creator_id": creator_id,
             "message": "No triggers to save"
         }
 
-    # Validate creator exists
     try:
         with get_db_connection() as conn:
             creator_row = conn.execute("""
@@ -2614,10 +2631,22 @@ def save_volume_triggers(creator_id: str, triggers: list) -> dict:
 
             creator_pk = creator_row[0]
 
-            # Validate all triggers BEFORE any DB writes (atomic batch)
+            # ============================================================
+            # LAYER 1.5: BATCH SIZE CHECK
+            # ============================================================
+            all_warnings = []
+            LARGE_BATCH_THRESHOLD = 20
+            if len(triggers) > LARGE_BATCH_THRESHOLD:
+                all_warnings.append(
+                    f"Large batch: {len(triggers)} triggers (threshold: {LARGE_BATCH_THRESHOLD}). "
+                    f"Consider reviewing trigger detection logic."
+                )
+
+            # ============================================================
+            # LAYER 2: VALIDATION - validate_trigger(), collect all errors
+            # ============================================================
             validated = []
             validation_errors = []
-            all_warnings = []
 
             for i, trigger in enumerate(triggers):
                 is_valid, result = validate_trigger(trigger, i)
@@ -2640,45 +2669,192 @@ def save_volume_triggers(creator_id: str, triggers: list) -> dict:
                     "creator_id": creator_id
                 }
 
-            # Persist validated triggers
-            saved = 0
+            # ============================================================
+            # LAYER 3: PRE-QUERY - Query existing rows, detect overwrites
+            # ============================================================
+            existing_triggers = {}
+            if validated:
+                # Build query for existing triggers by (content_type, trigger_type)
+                params = [creator_pk]
+                conditions = []
+                for t in validated:
+                    conditions.append("(content_type = ? AND trigger_type = ?)")
+                    params.extend([t["content_type"], t["trigger_type"]])
+
+                query = f"""
+                    SELECT trigger_id, content_type, trigger_type, adjustment_multiplier,
+                           detection_count, first_detected_at
+                    FROM volume_triggers
+                    WHERE creator_id = ? AND ({" OR ".join(conditions)})
+                """
+
+                rows = conn.execute(query, params).fetchall()
+
+                for row in rows:
+                    key = (row[1], row[2])  # (content_type, trigger_type)
+                    existing_triggers[key] = {
+                        "trigger_id": row[0],
+                        "adjustment_multiplier": row[3],
+                        "detection_count": row[4] or 1,
+                        "first_detected_at": row[5]
+                    }
+
+            # ============================================================
+            # LAYER 3.5: OVERWRITE ANALYSIS
+            # ============================================================
+            overwrite_warnings = []
             for t in validated:
-                # Remove internal fields
-                t.pop("_warnings", None)
+                key = (t["content_type"], t["trigger_type"])
+                if key in existing_triggers:
+                    existing = existing_triggers[key]
+                    old_mult = existing["adjustment_multiplier"]
+                    new_mult = t["adjustment_multiplier"]
 
-                conn.execute("""
-                    INSERT OR REPLACE INTO volume_triggers (
-                        creator_id,
-                        content_type,
-                        trigger_type,
-                        adjustment_multiplier,
-                        confidence,
-                        reason,
-                        expires_at,
-                        detected_at,
-                        is_active,
-                        metrics_json
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), 1, ?)
-                """, (
-                    creator_pk,
-                    t["content_type"],
-                    t["trigger_type"],
-                    t["adjustment_multiplier"],
-                    t["confidence"],
-                    t["reason"],
-                    t["expires_at"],
-                    json.dumps(t["metrics_json"]) if t["metrics_json"] else None
-                ))
-                saved += 1
+                    # Direction flip detection
+                    direction_flip = (old_mult > 1.0 and new_mult < 1.0) or \
+                                    (old_mult < 1.0 and new_mult > 1.0)
 
-            conn.commit()
+                    # Large delta detection (>50% change)
+                    if old_mult != 0:
+                        delta_percent = ((new_mult - old_mult) / old_mult) * 100
+                    else:
+                        delta_percent = 100.0 if new_mult != 0 else 0.0
+
+                    large_delta = abs(delta_percent) > 50
+
+                    if direction_flip or large_delta:
+                        overwrite_warnings.append({
+                            "trigger_id": existing["trigger_id"],
+                            "content_type": t["content_type"],
+                            "trigger_type": t["trigger_type"],
+                            "old_multiplier": old_mult,
+                            "new_multiplier": new_mult,
+                            "direction_flip": direction_flip,
+                            "delta_percent": round(delta_percent, 1)
+                        })
+
+                        # Also add to warnings list for backward compatibility
+                        if direction_flip:
+                            all_warnings.append(
+                                f"direction flip detected ({old_mult} -> {new_mult}) "
+                                f"for {t['content_type']}/{t['trigger_type']}"
+                            )
+
+            # ============================================================
+            # LAYER 4: PERSISTENCE - BEGIN IMMEDIATE, ON CONFLICT UPSERT, COMMIT
+            # ============================================================
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+
+                created_ids = []
+                updated_ids = []
+
+                for t in validated:
+                    # Remove internal fields
+                    t.pop("_warnings", None)
+
+                    # Determine if this is create or update BEFORE INSERT
+                    key = (t["content_type"], t["trigger_type"])
+                    is_update = key in existing_triggers
+
+                    cursor = conn.execute("""
+                        INSERT INTO volume_triggers (
+                            creator_id,
+                            content_type,
+                            trigger_type,
+                            adjustment_multiplier,
+                            confidence,
+                            reason,
+                            expires_at,
+                            detected_at,
+                            is_active,
+                            metrics_json,
+                            detection_count,
+                            first_detected_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), 1, ?, 1, datetime('now'))
+                        ON CONFLICT (creator_id, content_type, trigger_type) DO UPDATE SET
+                            adjustment_multiplier = excluded.adjustment_multiplier,
+                            confidence = CASE
+                                WHEN excluded.confidence > volume_triggers.confidence THEN excluded.confidence
+                                ELSE volume_triggers.confidence
+                            END,
+                            reason = excluded.reason,
+                            expires_at = excluded.expires_at,
+                            detected_at = datetime('now'),
+                            is_active = 1,
+                            metrics_json = excluded.metrics_json,
+                            detection_count = volume_triggers.detection_count + 1
+                        RETURNING trigger_id
+                    """, (
+                        creator_pk,
+                        t["content_type"],
+                        t["trigger_type"],
+                        t["adjustment_multiplier"],
+                        t["confidence"],
+                        t["reason"],
+                        t["expires_at"],
+                        json.dumps(t["metrics_json"]) if t["metrics_json"] else None
+                    ))
+
+                    trigger_id = cursor.fetchone()[0]
+
+                    if is_update:
+                        updated_ids.append(trigger_id)
+                    else:
+                        created_ids.append(trigger_id)
+                        # Track for duplicates in same batch
+                        existing_triggers[key] = {"trigger_id": trigger_id}
+
+                conn.execute("COMMIT")
+
+            except Exception as e:
+                conn.execute("ROLLBACK")
+                logger.error(f"save_volume_triggers rollback: {e}")
+                raise
+
+            # ============================================================
+            # LAYER 5: RESPONSE - Build metadata, compute hash, return
+            # ============================================================
+            def compute_triggers_hash(validated_triggers: list) -> str:
+                """Compute deterministic hash of normalized triggers."""
+                # Normalize for hashing: sort by (content_type, trigger_type)
+                sorted_triggers = sorted(
+                    validated_triggers,
+                    key=lambda t: (t["content_type"], t["trigger_type"])
+                )
+
+                # Include only fields that affect behavior
+                hash_inputs = [
+                    {
+                        "content_type": t["content_type"],
+                        "trigger_type": t["trigger_type"],
+                        "adjustment_multiplier": t["adjustment_multiplier"],
+                        "confidence": t["confidence"],
+                        "expires_at": t["expires_at"]
+                    }
+                    for t in sorted_triggers
+                ]
+
+                hash_str = json.dumps(hash_inputs, sort_keys=True)
+                return hashlib.sha256(hash_str.encode()).hexdigest()[:16]
+
+            triggers_hash = compute_triggers_hash(validated)
+            execution_ms = (datetime.now() - start_time).total_seconds() * 1000
 
             return {
                 "success": True,
-                "triggers_saved": saved,
+                "triggers_saved": len(created_ids) + len(updated_ids),
+                "created_ids": created_ids,
+                "updated_ids": updated_ids,
                 "creator_id": creator_id,
                 "creator_id_resolved": creator_pk,
-                "warnings": all_warnings if all_warnings else None
+                "warnings": all_warnings if all_warnings else None,
+                "overwrite_warnings": overwrite_warnings if overwrite_warnings else None,
+                "metadata": {
+                    "persisted_at": datetime.now().isoformat() + "Z",
+                    "execution_ms": round(execution_ms, 2),
+                    "triggers_hash": f"sha256:{triggers_hash}"
+                }
             }
 
     except Exception as e:

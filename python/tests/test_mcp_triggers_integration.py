@@ -60,7 +60,9 @@ def test_db():
             expires_at TEXT NOT NULL,
             is_active INTEGER NOT NULL DEFAULT 1,
             applied_count INTEGER DEFAULT 0,
-            last_applied_at TEXT
+            last_applied_at TEXT,
+            detection_count INTEGER NOT NULL DEFAULT 1,
+            first_detected_at TEXT NOT NULL DEFAULT (datetime('now'))
         )
     """)
 
@@ -71,10 +73,10 @@ def test_db():
         WHERE is_active = 1
     """)
 
+    # Full unique index (not partial) required for ON CONFLICT to work
     conn.execute("""
         CREATE UNIQUE INDEX idx_volume_triggers_natural_key
         ON volume_triggers(creator_id, content_type, trigger_type)
-        WHERE is_active = 1
     """)
 
     # Seed test data
