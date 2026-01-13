@@ -1832,8 +1832,11 @@ def get_active_volume_triggers(creator_id: str) -> dict:
                     vt.metrics_json,
                     vt.applied_count,
                     vt.last_applied_at,
+                    vt.detection_count,
+                    vt.first_detected_at,
                     CAST(julianday(vt.expires_at) - julianday('now') AS INTEGER) as days_until_expiry,
-                    CAST(julianday('now') - julianday(vt.detected_at) AS INTEGER) as days_since_detected
+                    CAST(julianday('now') - julianday(vt.detected_at) AS INTEGER) as days_since_detected,
+                    CAST(julianday('now') - julianday(vt.first_detected_at) AS INTEGER) as days_since_first_detected
                 FROM volume_triggers vt
                 WHERE vt.creator_id = ?
                   AND vt.is_active = 1
@@ -1866,8 +1869,11 @@ def get_active_volume_triggers(creator_id: str) -> dict:
                     "source": "database",
                     "applied_count": row[9] or 0,
                     "last_applied_at": row[10],
-                    "days_until_expiry": row[11],
-                    "days_since_detected": row[12]
+                    "detection_count": row[11] or 1,
+                    "first_detected_at": row[12],
+                    "days_until_expiry": row[13],
+                    "days_since_detected": row[14],
+                    "days_since_first_detected": row[15]
                 })
 
             # Calculate compound multiplier

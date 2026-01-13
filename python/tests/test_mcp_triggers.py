@@ -56,9 +56,13 @@ class TestGetActiveVolumeTriggers:
         mock_db_connection.execute.return_value.fetchone.side_effect = [
             ("cr_123", "testpage", 10000, "paid", "STANDARD"),  # Creator row
         ]
+        # Columns: trigger_id, content_type, trigger_type, adjustment_multiplier, confidence,
+        #          reason, expires_at, detected_at, metrics_json, applied_count, last_applied_at,
+        #          detection_count, first_detected_at, days_until_expiry, days_since_detected,
+        #          days_since_first_detected
         mock_db_connection.execute.return_value.fetchall.return_value = [
             (1, "lingerie", "HIGH_PERFORMER", 1.20, "high", "Test",
-             "2026-01-20", "2026-01-10", '{}', 0, None, 10, 0)
+             "2026-01-20", "2026-01-10", '{}', 0, None, 1, "2026-01-10", 10, 0, 0)
         ]
 
         with patch("main.get_db_connection", return_value=mock_db_connection):
@@ -84,11 +88,15 @@ class TestGetActiveVolumeTriggers:
         mock_db_connection.execute.return_value.fetchone.side_effect = [
             ("cr_123", "testpage", 10000, "paid", "STANDARD"),
         ]
+        # Columns: trigger_id, content_type, trigger_type, adjustment_multiplier, confidence,
+        #          reason, expires_at, detected_at, metrics_json, applied_count, last_applied_at,
+        #          detection_count, first_detected_at, days_until_expiry, days_since_detected,
+        #          days_since_first_detected
         mock_db_connection.execute.return_value.fetchall.return_value = [
             (1, "lingerie", "HIGH_PERFORMER", 1.20, "high", "Test",
-             "2026-01-20", "2026-01-10", '{}', 0, None, 10, 0),
+             "2026-01-20", "2026-01-10", '{}', 0, None, 1, "2026-01-10", 10, 0, 0),
             (2, "lingerie", "SATURATING", 0.85, "moderate", "Test",
-             "2026-01-20", "2026-01-10", '{}', 0, None, 10, 0)
+             "2026-01-20", "2026-01-10", '{}', 0, None, 1, "2026-01-10", 10, 0, 0)
         ]
 
         with patch("main.get_db_connection", return_value=mock_db_connection):
@@ -144,9 +152,13 @@ class TestBackwardCompatibility:
         mock_db_connection.execute.return_value.fetchone.side_effect = [
             ("cr_123", "testpage", 10000, "paid", "STANDARD"),
         ]
+        # Columns: trigger_id, content_type, trigger_type, adjustment_multiplier, confidence,
+        #          reason, expires_at, detected_at, metrics_json, applied_count, last_applied_at,
+        #          detection_count, first_detected_at, days_until_expiry, days_since_detected,
+        #          days_since_first_detected
         mock_db_connection.execute.return_value.fetchall.return_value = [
             (1, "lingerie", "HIGH_PERFORMER", 1.20, "high", "Test",
-             "2026-01-20", "2026-01-10", '{}', 0, None, 10, 0)
+             "2026-01-20", "2026-01-10", '{}', 0, None, 1, "2026-01-10", 10, 0, 0)
         ]
 
         with patch("main.get_db_connection", return_value=mock_db_connection):
