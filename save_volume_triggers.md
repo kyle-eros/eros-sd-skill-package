@@ -440,6 +440,10 @@ conn.execute("""
 
 **After** (v3.0.0):
 ```python
+# Determine if this is create or update BEFORE INSERT (using pre-query from Layer 3)
+key = (t["content_type"], t["trigger_type"])
+is_update = key in existing_triggers
+
 cursor = conn.execute("""
     INSERT INTO volume_triggers (
         creator_id,
@@ -467,8 +471,7 @@ cursor = conn.execute("""
         is_active = 1,
         metrics_json = excluded.metrics_json,
         detection_count = volume_triggers.detection_count + 1
-    RETURNING trigger_id,
-              CASE WHEN detection_count = 1 THEN 'created' ELSE 'updated' END as operation
+    RETURNING trigger_id
 """, (
     creator_pk,
     t["content_type"],
@@ -480,14 +483,14 @@ cursor = conn.execute("""
     json.dumps(t["metrics_json"]) if t["metrics_json"] else None
 ))
 
-result_row = cursor.fetchone()
-trigger_id = result_row[0]
-operation = result_row[1]
+trigger_id = cursor.fetchone()[0]
 
-if operation == 'created':
-    created_ids.append(trigger_id)
-else:
+# Use pre-query result to classify operation (NOT RETURNING - detection_count already incremented)
+if is_update:
     updated_ids.append(trigger_id)
+else:
+    created_ids.append(trigger_id)
+    existing_triggers[key] = {"trigger_id": trigger_id}  # Track for duplicates in same batch
 ```
 
 #### 2.5 Add Direction Flip and Large Delta Warnings
@@ -1403,10 +1406,26 @@ pytest python/tests/test_mcp_triggers_integration.py -v
 
 | Item | Description | Why Deferred |
 |------|-------------|--------------|
-| `applied_trigger_ids` in save_schedule | Track which triggers influenced each schedule | Separate concern, requires save_schedule changes |
+| `applied_trigger_ids` in save_schedule | Add `applied_trigger_ids: list[int]` parameter to save_schedule; on successful save, UPDATE volume_triggers SET applied_count = applied_count + 1, last_applied_at = datetime('now') WHERE trigger_id IN (...) | Separate concern, requires save_schedule changes. Completes GAP-2 (orphaned applied_count/last_applied_at columns). |
 | Trigger expiration sweep | Background job to deactivate expired triggers | Operational concern, not tool behavior |
 | Trigger analytics dashboard | Visualize detection patterns | UI/reporting scope |
-| Trigger confidence auto-adjustment | Increase confidence on repeated detection | Needs product decision |
+| Trigger confidence auto-adjustment | Auto-upgrade confidence when detection_count >= 5 | Needs product decision - current MAX(db, runtime) is sufficient for now |
+
+### Preflight Integration Notes
+
+When merging DB triggers with runtime-detected triggers, `preflight.py._merge_triggers()` should use field-by-field rules:
+
+| Field | Rule | Rationale |
+|-------|------|-----------|
+| `adjustment_multiplier` | Runtime wins | Fresher metrics |
+| `confidence` | MAX(db, runtime) | Ratchets up, never down |
+| `reason` | Runtime wins | Current explanation |
+| `expires_at` | Runtime wins | Reset TTL |
+| `detection_count` | db.count + 1 | Proves persistence |
+| `first_detected_at` | DB wins | Preserve original |
+| `detected_at` | Runtime wins | When last confirmed |
+
+This merge logic lives in preflight, NOT in save_volume_triggers. The save tool receives already-merged triggers and persists them.
 
 ### Potential v3.1.0 Enhancements
 
