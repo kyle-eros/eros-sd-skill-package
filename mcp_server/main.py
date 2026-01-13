@@ -31,7 +31,7 @@ import hashlib
 import time
 from pathlib import Path
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 
 from .volume_utils import (
     TIERS, TIER_ORDER, PRIME_HOURS, DAY_NAMES,
@@ -3538,7 +3538,7 @@ def _get_send_types_cache() -> dict[str, dict]:
         types_hash = hashlib.sha256(keys_str.encode()).hexdigest()[:12]
 
         _SEND_TYPES_CACHE_META = {
-            "cached_at": datetime.utcnow().isoformat() + "Z",
+            "cached_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "types_hash": types_hash
         }
         logger.info(f"Loaded {len(_SEND_TYPES_CACHE)} send_types into cache (hash={types_hash})")
@@ -3822,12 +3822,13 @@ def _build_send_types_error_response(
     return {
         "error": error_message,
         "error_code": error_code,
+        "valid_values": ["paid", "free", None],
         "by_category": {"revenue": [], "engagement": [], "retention": []},
         "all_send_type_keys": [],
         "counts": {"revenue": 0, "engagement": 0, "retention": 0, "total": 0},
         "page_type_filter": page_type_filter,
         "metadata": {
-            "fetched_at": datetime.utcnow().isoformat() + "Z",
+            "fetched_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "tool_version": "2.0.0",
             "source": "error",
             "cached_at": None,
@@ -3952,7 +3953,7 @@ def get_send_types_constraints(page_type: str = None) -> dict:
             },
             "page_type_filter": page_type,
             "metadata": {
-                "fetched_at": datetime.utcnow().isoformat() + "Z",
+                "fetched_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
                 "tool_version": "2.0.0",
                 "source": "cache" if cache_hit else "database",
                 "cached_at": cache_meta.get("cached_at") if cache_hit else None,

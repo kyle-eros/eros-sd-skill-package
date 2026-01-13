@@ -116,7 +116,7 @@ class TestInputValidation:
         assert len(result['all_send_type_keys']) == 5  # All mock types
 
     def test_invalid_page_type_returns_error(self, mock_db):
-        """Invalid page_type should return error with code."""
+        """Invalid page_type should return error with code and valid_values."""
         from mcp_server.main import get_send_types_constraints
         result = get_send_types_constraints(page_type='invalid_value')
 
@@ -125,6 +125,9 @@ class TestInputValidation:
         assert 'invalid_value' in result['error']
         assert result['by_category'] == {"revenue": [], "engagement": [], "retention": []}
         assert result['counts']['total'] == 0
+        # v2.0.1: valid_values as structured data
+        assert 'valid_values' in result
+        assert result['valid_values'] == ['paid', 'free', None]
 
 
 class TestResponseSchema:
