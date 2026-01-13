@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import calendar
 import hashlib
+import re
 from datetime import date, datetime, timedelta
 from typing import Final, Literal, TypedDict
 
@@ -633,3 +634,177 @@ def calculate_compound_multiplier(triggers: list[dict]) -> tuple[float, list[dic
     global_compound = max(TRIGGER_MULT_MIN, min(TRIGGER_MULT_MAX, round(global_compound, 4)))
 
     return (global_compound, compound_calculation, has_conflict)
+
+
+# =============================================================================
+# SCHEDULE VALIDATION FUNCTIONS (for save_schedule v2.0.0)
+# =============================================================================
+
+SCHEDULE_ITEM_REQUIRED_KEYS: Final[frozenset[str]] = frozenset({
+    "send_type_key", "scheduled_date", "scheduled_time"
+})
+
+SCHEDULE_DATE_REGEX: Final[re.Pattern] = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+SCHEDULE_TIME_REGEX: Final[re.Pattern] = re.compile(r"^\d{2}:\d{2}$")
+
+SCHEDULE_PRICE_MIN: Final[float] = 5.0
+SCHEDULE_PRICE_MAX: Final[float] = 50.0
+
+
+class ScheduleItemInput(TypedDict, total=False):
+    """Input schema for schedule item validation."""
+    send_type_key: str
+    scheduled_date: str
+    scheduled_time: str
+    content_type: str
+    price: float
+    caption_id: int
+    flyer_required: int
+
+
+def validate_schedule_items(items: list) -> tuple[bool, list[str]]:
+    """
+    Validate schedule items for structural correctness before persistence.
+
+    Performs STRUCTURAL validation only - does not validate business rules
+    (that's the Validator agent's job).
+
+    Args:
+        items: List of schedule item dictionaries
+
+    Returns:
+        (True, []) on success
+        (False, [error1, ...]) on failure
+    """
+    if not items:
+        return (False, ["items list is empty"])
+
+    if not isinstance(items, list):
+        return (False, [f"items must be a list, got {type(items).__name__}"])
+
+    errors: list[str] = []
+
+    for idx, item in enumerate(items):
+        if not isinstance(item, dict):
+            errors.append(f"item[{idx}]: must be a dict, got {type(item).__name__}")
+            continue
+
+        # Check required keys
+        missing_keys = SCHEDULE_ITEM_REQUIRED_KEYS - set(item.keys())
+        if missing_keys:
+            errors.append(f"item[{idx}]: missing required keys: {', '.join(sorted(missing_keys))}")
+            continue
+
+        # Validate date format
+        scheduled_date = item.get("scheduled_date", "")
+        if not SCHEDULE_DATE_REGEX.match(str(scheduled_date)):
+            errors.append(f"item[{idx}]: scheduled_date '{scheduled_date}' must match YYYY-MM-DD")
+
+        # Validate time format
+        scheduled_time = item.get("scheduled_time", "")
+        if not SCHEDULE_TIME_REGEX.match(str(scheduled_time)):
+            errors.append(f"item[{idx}]: scheduled_time '{scheduled_time}' must match HH:MM")
+
+        # Validate price bounds (if present)
+        if "price" in item and item["price"] is not None:
+            try:
+                price = float(item["price"])
+                if not (SCHEDULE_PRICE_MIN <= price <= SCHEDULE_PRICE_MAX):
+                    errors.append(
+                        f"item[{idx}]: price {price} outside bounds "
+                        f"[{SCHEDULE_PRICE_MIN}, {SCHEDULE_PRICE_MAX}]"
+                    )
+            except (TypeError, ValueError):
+                errors.append(f"item[{idx}]: price must be numeric, got {type(item['price']).__name__}")
+
+        # Validate flyer_required (if present)
+        if "flyer_required" in item and item["flyer_required"] is not None:
+            flyer = item["flyer_required"]
+            if flyer not in (0, 1, True, False):
+                errors.append(f"item[{idx}]: flyer_required must be 0 or 1, got {flyer}")
+
+    return (len(errors) == 0, errors)
+
+
+def validate_certificate_freshness(
+    certificate: dict | None,
+    max_age_seconds: int = 300,
+    tolerance_seconds: int = 30
+) -> tuple[bool, str | None]:
+    """
+    Validate that a ValidationCertificate is fresh enough for persistence.
+
+    SOFT GATE: Expired certificates don't reject - they downgrade status to 'draft'.
+
+    Args:
+        certificate: ValidationCertificate dict or None
+        max_age_seconds: Maximum allowed age (default 300 = 5 minutes)
+        tolerance_seconds: Future timestamp tolerance (default 30s for clock skew)
+
+    Returns:
+        (True, None) - Certificate is fresh or not provided
+        (False, error_message) - Certificate is stale/invalid
+    """
+    if not certificate:
+        return (True, None)
+
+    timestamp_str = certificate.get("validation_timestamp")
+    if not timestamp_str:
+        return (False, "certificate missing validation_timestamp")
+
+    try:
+        if isinstance(timestamp_str, str):
+            timestamp_str = timestamp_str.replace("Z", "+00:00")
+            cert_time = datetime.fromisoformat(timestamp_str)
+        else:
+            return (False, f"validation_timestamp must be string, got {type(timestamp_str).__name__}")
+
+        now = datetime.now(cert_time.tzinfo) if cert_time.tzinfo else datetime.now()
+        age_seconds = (now - cert_time).total_seconds()
+
+        if age_seconds < -tolerance_seconds:
+            return (False, f"certificate timestamp is {abs(age_seconds):.0f}s in the future")
+
+        if age_seconds > max_age_seconds:
+            return (False, f"certificate expired (age: {age_seconds:.0f}s > {max_age_seconds}s)")
+
+    except ValueError as e:
+        return (False, f"certificate has invalid timestamp format: {e}")
+
+    return (True, None)
+
+
+def compute_schedule_hash(items: list) -> str:
+    """
+    Compute deterministic hash of schedule items for audit trail.
+
+    Args:
+        items: List of schedule item dictionaries
+
+    Returns:
+        Hash string in format "sha256:{16-char-hex}"
+    """
+    if not items:
+        return "sha256:empty"
+
+    sorted_items = sorted(
+        items,
+        key=lambda x: (x.get("scheduled_date", ""), x.get("scheduled_time", ""))
+    )
+
+    hash_components: list[str] = []
+    for item in sorted_items:
+        components = [
+            str(item.get("send_type_key", "")),
+            str(item.get("scheduled_date", "")),
+            str(item.get("scheduled_time", "")),
+            str(item.get("content_type", "")),
+            str(item.get("price", "")),
+            str(item.get("caption_id", ""))
+        ]
+        hash_components.append("|".join(components))
+
+    hash_input = "\n".join(hash_components).encode("utf-8")
+    hash_digest = hashlib.sha256(hash_input).hexdigest()[:16]
+
+    return f"sha256:{hash_digest}"

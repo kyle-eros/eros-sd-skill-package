@@ -43,6 +43,10 @@ from volume_utils import (
     compute_volume_config_hash,
     get_week_dates,
     get_day_name,
+    # Schedule validation functions (save_schedule v2.0.0)
+    validate_schedule_items,
+    validate_certificate_freshness,
+    compute_schedule_hash,
 )
 
 
@@ -751,3 +755,159 @@ class TestCompoundMultiplier:
         assert compound == pytest.approx(1.32, rel=1e-3)  # 1.2 * 1.1
         assert len(calc) == 2
         assert not conflict  # Different content types don't conflict
+
+
+# =============================================================================
+# SCHEDULE VALIDATION TESTS (save_schedule v2.0.0)
+# =============================================================================
+
+
+class TestValidateScheduleItems:
+    """Test schedule item validation."""
+
+    def test_valid_minimal_item(self):
+        items = [{"send_type_key": "ppv_unlock", "scheduled_date": "2026-01-06", "scheduled_time": "14:30"}]
+        is_valid, errors = validate_schedule_items(items)
+        assert is_valid is True
+        assert errors == []
+
+    def test_valid_complete_item(self):
+        items = [{
+            "send_type_key": "ppv_unlock",
+            "scheduled_date": "2026-01-06",
+            "scheduled_time": "14:30",
+            "content_type": "lingerie",
+            "caption_id": 12345,
+            "price": 15.00,
+            "flyer_required": 1
+        }]
+        is_valid, errors = validate_schedule_items(items)
+        assert is_valid is True
+
+    def test_empty_items_rejected(self):
+        is_valid, errors = validate_schedule_items([])
+        assert is_valid is False
+        assert "empty" in errors[0]
+
+    def test_missing_required_keys(self):
+        items = [{"content_type": "lingerie"}]
+        is_valid, errors = validate_schedule_items(items)
+        assert is_valid is False
+        assert len(errors) == 1  # All missing keys in one message
+        assert "send_type_key" in errors[0]
+        assert "scheduled_date" in errors[0]
+        assert "scheduled_time" in errors[0]
+
+    def test_invalid_date_format(self):
+        items = [{"send_type_key": "ppv_unlock", "scheduled_date": "01-06-2026", "scheduled_time": "14:30"}]
+        is_valid, errors = validate_schedule_items(items)
+        assert is_valid is False
+        assert "YYYY-MM-DD" in errors[0]
+
+    def test_invalid_time_format(self):
+        items = [{"send_type_key": "ppv_unlock", "scheduled_date": "2026-01-06", "scheduled_time": "2:30 PM"}]
+        is_valid, errors = validate_schedule_items(items)
+        assert is_valid is False
+        assert "HH:MM" in errors[0]
+
+    def test_price_below_minimum(self):
+        items = [{"send_type_key": "ppv_unlock", "scheduled_date": "2026-01-06", "scheduled_time": "14:30", "price": 3.00}]
+        is_valid, errors = validate_schedule_items(items)
+        assert is_valid is False
+        assert "outside bounds" in errors[0]
+
+    def test_price_above_maximum(self):
+        items = [{"send_type_key": "ppv_unlock", "scheduled_date": "2026-01-06", "scheduled_time": "14:30", "price": 75.00}]
+        is_valid, errors = validate_schedule_items(items)
+        assert is_valid is False
+        assert "outside bounds" in errors[0]
+
+    def test_price_at_boundaries(self):
+        items = [
+            {"send_type_key": "a", "scheduled_date": "2026-01-06", "scheduled_time": "10:00", "price": 5.00},
+            {"send_type_key": "b", "scheduled_date": "2026-01-06", "scheduled_time": "11:00", "price": 50.00}
+        ]
+        is_valid, errors = validate_schedule_items(items)
+        assert is_valid is True
+
+    def test_invalid_flyer_required(self):
+        items = [{"send_type_key": "ppv_unlock", "scheduled_date": "2026-01-06", "scheduled_time": "14:30", "flyer_required": 5}]
+        is_valid, errors = validate_schedule_items(items)
+        assert is_valid is False
+        assert "flyer_required" in errors[0]
+
+
+class TestValidateCertificateFreshness:
+    """Test certificate freshness validation."""
+
+    def test_no_certificate_is_valid(self):
+        is_fresh, error = validate_certificate_freshness(None)
+        assert is_fresh is True
+        assert error is None
+
+    def test_fresh_certificate(self):
+        from datetime import datetime, timezone
+        cert = {"validation_timestamp": datetime.now(timezone.utc).isoformat()}
+        is_fresh, error = validate_certificate_freshness(cert)
+        assert is_fresh is True
+        assert error is None
+
+    def test_expired_certificate(self):
+        cert = {"validation_timestamp": "2020-01-01T00:00:00Z"}
+        is_fresh, error = validate_certificate_freshness(cert)
+        assert is_fresh is False
+        assert "expired" in error
+
+    def test_missing_timestamp(self):
+        cert = {"validation_status": "APPROVED"}
+        is_fresh, error = validate_certificate_freshness(cert)
+        assert is_fresh is False
+        assert "missing validation_timestamp" in error
+
+    def test_custom_max_age(self):
+        from datetime import datetime, timezone, timedelta
+        old_time = datetime.now(timezone.utc) - timedelta(seconds=120)
+        cert = {"validation_timestamp": old_time.isoformat()}
+
+        # Should pass with 300s default
+        is_fresh, _ = validate_certificate_freshness(cert, max_age_seconds=300)
+        assert is_fresh is True
+
+        # Should fail with 60s max
+        is_fresh, _ = validate_certificate_freshness(cert, max_age_seconds=60)
+        assert is_fresh is False
+
+
+class TestComputeScheduleHash:
+    """Test schedule hash computation."""
+
+    def test_deterministic_hash(self):
+        items = [{"send_type_key": "ppv_unlock", "scheduled_date": "2026-01-06", "scheduled_time": "14:00"}]
+        hash1 = compute_schedule_hash(items)
+        hash2 = compute_schedule_hash(items)
+        assert hash1 == hash2
+
+    def test_different_items_different_hash(self):
+        items1 = [{"send_type_key": "ppv_unlock", "scheduled_date": "2026-01-06", "scheduled_time": "14:00"}]
+        items2 = [{"send_type_key": "ppv_unlock", "scheduled_date": "2026-01-07", "scheduled_time": "14:00"}]
+        assert compute_schedule_hash(items1) != compute_schedule_hash(items2)
+
+    def test_order_independent(self):
+        items1 = [
+            {"send_type_key": "a", "scheduled_date": "2026-01-06", "scheduled_time": "10:00"},
+            {"send_type_key": "b", "scheduled_date": "2026-01-06", "scheduled_time": "11:00"}
+        ]
+        items2 = [
+            {"send_type_key": "b", "scheduled_date": "2026-01-06", "scheduled_time": "11:00"},
+            {"send_type_key": "a", "scheduled_date": "2026-01-06", "scheduled_time": "10:00"}
+        ]
+        assert compute_schedule_hash(items1) == compute_schedule_hash(items2)
+
+    def test_empty_items_hash(self):
+        assert compute_schedule_hash([]) == "sha256:empty"
+
+    def test_hash_format(self):
+        items = [{"send_type_key": "test", "scheduled_date": "2026-01-06", "scheduled_time": "12:00"}]
+        h = compute_schedule_hash(items)
+        assert h.startswith("sha256:")
+        assert len(h) == 23  # "sha256:" + 16 hex chars
