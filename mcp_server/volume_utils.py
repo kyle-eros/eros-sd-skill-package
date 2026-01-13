@@ -808,3 +808,40 @@ def compute_schedule_hash(items: list) -> str:
     hash_digest = hashlib.sha256(hash_input).hexdigest()[:16]
 
     return f"sha256:{hash_digest}"
+
+
+# =============================================================================
+# CAPTION TOOL CONSTANTS (added for get_batch_captions_by_content_types v2.0)
+# =============================================================================
+
+CAPTION_TIER_LABELS: Final[dict[int, str]] = {
+    1: "ELITE",
+    2: "PROVEN",
+    3: "STANDARD",
+    4: "UNPROVEN"
+}
+
+CAPTION_TIER_SCORES: Final[dict[int, int]] = {
+    1: 100,
+    2: 75,
+    3: 50,
+    4: 25
+}
+
+EFFECTIVELY_FRESH_DAYS: Final[int] = 90
+
+CAPTION_TOOL_ERROR_CODES: Final[frozenset] = frozenset({
+    "INVALID_CREATOR_ID",
+    "INVALID_CREATOR_ID_FORMAT",
+    "CREATOR_NOT_FOUND",
+    "INVALID_CONTENT_TYPES",
+    "EMPTY_CONTENT_TYPES",
+    "CONTENT_TYPES_LIMIT_EXCEEDED",
+    "INVALID_CONTENT_TYPE_ELEMENTS",
+    "INVALID_SCHEDULABLE_TYPE",
+    "DATABASE_ERROR"
+})
+
+VALID_SCHEDULABLE_TYPES: Final[frozenset] = frozenset({'ppv', 'ppv_bump', 'wall'})
+
+MAX_CONTENT_TYPES: Final[int] = 50

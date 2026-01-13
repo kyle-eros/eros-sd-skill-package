@@ -37,7 +37,10 @@ from volume_utils import (
     TIERS, TIER_ORDER, PRIME_HOURS, DAY_NAMES,
     get_tier, get_tier_ranges, calc_calendar_boost, calc_weekend_boost,
     calc_bump_multiplier, calc_health_status, calc_consecutive_decline_weeks,
-    compute_volume_config_hash, get_week_dates, get_day_name
+    compute_volume_config_hash, get_week_dates, get_day_name,
+    # Caption tool constants (v2.0)
+    CAPTION_TIER_LABELS, CAPTION_TIER_SCORES, EFFECTIVELY_FRESH_DAYS,
+    VALID_SCHEDULABLE_TYPES, MAX_CONTENT_TYPES
 )
 
 # Configure logging
@@ -2877,72 +2880,366 @@ def save_volume_triggers(creator_id: str, triggers: list) -> dict:
 # CAPTION TOOLS (3)
 # ============================================================
 
+
+def _build_caption_error_response(
+    error_code: str,
+    error_message: str,
+    content_types: list
+) -> dict:
+    """Build consistent error response matching success schema."""
+    return {
+        "error": error_message,
+        "error_code": error_code,
+        "creator_id": None,
+        "captions_by_type": {},
+        "total_captions": 0,
+        "types_requested": len(content_types) if isinstance(content_types, list) else 0,
+        "metadata": {
+            "fetched_at": datetime.utcnow().isoformat() + "Z",
+            "error": True
+        }
+    }
+
+
 @mcp.tool()
 def get_batch_captions_by_content_types(
     creator_id: str,
     content_types: list,
-    limit_per_type: int = 5
+    limit_per_type: int = 5,
+    schedulable_type: str = None
 ) -> dict:
     """Batch retrieves captions filtered by content types for PPV selection.
 
     MCP Name: mcp__eros-db__get_batch_captions_by_content_types
+    Version: 2.0.0
 
     Args:
-        creator_id: Creator identifier
-        content_types: List of content type names to filter
-        limit_per_type: Max captions per content type (default 5, max 20)
+        creator_id: Creator identifier (required for per-creator freshness)
+        content_types: List of content type names to filter (max 50)
+        limit_per_type: Max captions per content type (clamped 1-20, default 5)
+        schedulable_type: Filter by schedulable type ('ppv', 'ppv_bump', 'wall', or None)
 
     Returns:
-        Captions grouped by content type
+        Dict with captions_by_type (including pool_stats), total_captions,
+        types_requested, and metadata block for ValidationCertificate.
+
+    Example:
+        get_batch_captions_by_content_types(
+            creator_id="alexia",
+            content_types=["lingerie", "shower"],
+            limit_per_type=5,
+            schedulable_type="ppv"
+        )
     """
-    logger.info(f"get_batch_captions_by_content_types: creator_id={creator_id}, types={content_types}")
+    from datetime import date
+
+    start_time = time.perf_counter()
+
+    logger.info(f"get_batch_captions_by_content_types: creator_id={creator_id}, "
+                f"types={len(content_types) if isinstance(content_types, list) else 'invalid'}, "
+                f"schedulable_type={schedulable_type}")
+
+    # =========================================================================
+    # LAYER 1: Type validation
+    # =========================================================================
+    if not creator_id or not isinstance(creator_id, str):
+        return _build_caption_error_response(
+            "INVALID_CREATOR_ID",
+            "creator_id must be a non-empty string",
+            content_types if isinstance(content_types, list) else []
+        )
+
+    if not isinstance(content_types, list):
+        return _build_caption_error_response(
+            "INVALID_CONTENT_TYPES",
+            "content_types must be a list",
+            []
+        )
+
+    if len(content_types) == 0:
+        return _build_caption_error_response(
+            "EMPTY_CONTENT_TYPES",
+            "content_types cannot be empty",
+            []
+        )
+
+    if len(content_types) > MAX_CONTENT_TYPES:
+        return _build_caption_error_response(
+            "CONTENT_TYPES_LIMIT_EXCEEDED",
+            f"content_types exceeds maximum of {MAX_CONTENT_TYPES}",
+            content_types
+        )
+
+    if not all(isinstance(ct, str) for ct in content_types):
+        return _build_caption_error_response(
+            "INVALID_CONTENT_TYPE_ELEMENTS",
+            "All content_types elements must be strings",
+            content_types
+        )
+
+    if schedulable_type is not None and schedulable_type not in VALID_SCHEDULABLE_TYPES:
+        return _build_caption_error_response(
+            "INVALID_SCHEDULABLE_TYPE",
+            f"schedulable_type must be one of: {', '.join(sorted(VALID_SCHEDULABLE_TYPES))}",
+            content_types
+        )
+
+    # =========================================================================
+    # LAYER 2: Format validation
+    # =========================================================================
+    is_valid, validation_result = validate_creator_id(creator_id)
+    if not is_valid:
+        return _build_caption_error_response(
+            "INVALID_CREATOR_ID_FORMAT",
+            validation_result,
+            content_types
+        )
+
+    # =========================================================================
+    # LAYER 3: Resolution
+    # =========================================================================
+    resolved = resolve_creator_id(creator_id)
+    if not resolved["found"]:
+        return _build_caption_error_response(
+            "CREATOR_NOT_FOUND",
+            f"Creator not found: {creator_id}",
+            content_types
+        )
+
+    resolved_creator_id = resolved["creator_id"]
+
+    # =========================================================================
+    # LAYER 4: Normalize inputs
+    # =========================================================================
+    limit_per_type = max(1, min(20, limit_per_type))
+    unique_content_types = list(dict.fromkeys(content_types))
+
+    # =========================================================================
+    # LAYER 5: Execute batched query
+    # =========================================================================
     try:
-        # Note: caption_bank is global, not per-creator in this schema
-        # Filter by content_type_id matching the requested types
+        placeholders = ",".join("?" * len(unique_content_types))
 
-        limit_per_type = min(max(1, limit_per_type), 20)  # Clamp 1-20
+        query_params = (
+            [resolved_creator_id] +
+            unique_content_types +
+            [schedulable_type, schedulable_type] +
+            [resolved_creator_id] +
+            unique_content_types +
+            [schedulable_type, schedulable_type] +
+            [limit_per_type]
+        )
 
-        results = {}
-        total = 0
+        batched_query = f"""
+        WITH pool_stats AS (
+            SELECT
+                ct.type_name,
+                COUNT(*) as total_available,
+                SUM(CASE WHEN ccp.times_used IS NULL OR ccp.times_used = 0 THEN 1 ELSE 0 END) as fresh_for_creator,
+                AVG(cb.performance_tier) as avg_pool_performance_tier
+            FROM caption_bank cb
+            JOIN content_types ct ON cb.content_type_id = ct.content_type_id
+            LEFT JOIN caption_creator_performance ccp
+                ON cb.caption_id = ccp.caption_id AND ccp.creator_id = ?
+            WHERE ct.type_name IN ({placeholders})
+            AND cb.is_active = 1
+            AND (? IS NULL OR cb.schedulable_type = ?)
+            GROUP BY ct.type_name
+        ),
+        ranked_captions AS (
+            SELECT
+                cb.caption_id,
+                cb.caption_text,
+                cb.caption_type as category,
+                cb.performance_tier,
+                ct.type_name as content_type,
+                cb.global_last_used_date as last_used_at,
+                cb.global_times_used as use_count,
+                cb.suggested_price,
+                cb.price_range_min,
+                cb.price_range_max,
+                cb.avg_purchase_rate,
+                ccp.last_used_date as creator_last_used_at,
+                ccp.times_used as creator_use_count,
+                ROW_NUMBER() OVER (
+                    PARTITION BY ct.type_name
+                    ORDER BY
+                        ccp.last_used_date ASC NULLS FIRST,
+                        cb.performance_tier ASC,
+                        cb.global_last_used_date ASC NULLS FIRST
+                ) as rn
+            FROM caption_bank cb
+            JOIN content_types ct ON cb.content_type_id = ct.content_type_id
+            LEFT JOIN caption_creator_performance ccp
+                ON cb.caption_id = ccp.caption_id AND ccp.creator_id = ?
+            WHERE ct.type_name IN ({placeholders})
+            AND cb.is_active = 1
+            AND (? IS NULL OR cb.schedulable_type = ?)
+        )
+        SELECT rc.*, ps.total_available, ps.fresh_for_creator, ps.avg_pool_performance_tier
+        FROM ranked_captions rc
+        JOIN pool_stats ps ON rc.content_type = ps.type_name
+        WHERE rc.rn <= ?
+        ORDER BY rc.content_type, rc.rn
+        """
 
-        for ct in content_types:
-            # Get content_type_id first
-            ct_row = db_query(
-                "SELECT content_type_id FROM content_types WHERE type_name = ? LIMIT 1",
-                (ct,)
-            )
-            if not ct_row:
-                results[ct] = []
+        rows = db_query(batched_query, tuple(query_params))
+
+        # =====================================================================
+        # LAYER 6: Build response structure
+        # =====================================================================
+
+        def _compute_days_since(date_str):
+            """Compute days since a date string, or None if no date."""
+            if not date_str:
+                return None
+            try:
+                used_date = datetime.fromisoformat(str(date_str).replace('Z', '')).date()
+                return (date.today() - used_date).days
+            except (ValueError, TypeError):
+                return None
+
+        captions_by_type = {}
+        all_caption_ids = []
+
+        for content_type in unique_content_types:
+            type_rows = [r for r in rows if r["content_type"] == content_type]
+
+            if not type_rows:
+                captions_by_type[content_type] = {
+                    "captions": [],
+                    "pool_stats": {
+                        "total_available": 0,
+                        "fresh_for_creator": 0,
+                        "returned_count": 0,
+                        "has_more": False,
+                        "avg_pool_performance_tier": None
+                    }
+                }
                 continue
 
-            ct_id = ct_row[0]['content_type_id']
+            type_captions = []
+            for row in type_rows:
+                days_since = _compute_days_since(row.get("creator_last_used_at"))
+                tier = row.get("performance_tier", 4)
 
-            # Query caption_bank (actual table name, not captions)
-            captions = db_query("""
-                SELECT cb.caption_id, cb.caption_text, cb.caption_type as category,
-                       cb.performance_tier as quality_score, ct.type_name as content_type,
-                       cb.global_last_used_date as last_used_at, cb.global_times_used as use_count
-                FROM caption_bank cb
-                JOIN content_types ct ON cb.content_type_id = ct.content_type_id
-                WHERE cb.content_type_id = ?
-                AND cb.is_active = 1
-                ORDER BY cb.performance_tier ASC, cb.global_last_used_date ASC NULLS FIRST
-                LIMIT ?
-            """, (ct_id, limit_per_type))
+                caption_obj = {
+                    "caption_id": row["caption_id"],
+                    "caption_text": row["caption_text"],
+                    "category": row["category"],
+                    "content_type": row["content_type"],
+                    "last_used_at": row["last_used_at"],
+                    "use_count": row["use_count"] or 0,
+                    "performance_tier": tier,
+                    "tier_label": CAPTION_TIER_LABELS.get(tier, "UNKNOWN"),
+                    "quality_score": CAPTION_TIER_SCORES.get(tier, 0),
+                    "creator_last_used_at": row.get("creator_last_used_at"),
+                    "creator_use_count": row.get("creator_use_count") or 0,
+                    "days_since_creator_used": days_since,
+                    "effectively_fresh": days_since is None or days_since >= EFFECTIVELY_FRESH_DAYS,
+                    "pricing": {
+                        "suggested_price": row.get("suggested_price"),
+                        "price_range_min": row.get("price_range_min"),
+                        "price_range_max": row.get("price_range_max"),
+                        "avg_purchase_rate": row.get("avg_purchase_rate") or 0.0,
+                        "has_price_history": row.get("suggested_price") is not None
+                    }
+                }
+                type_captions.append(caption_obj)
+                all_caption_ids.append(row["caption_id"])
 
-            results[ct] = captions
-            total += len(captions)
+            first_row = type_rows[0]
+            total_available = first_row.get("total_available") or 0
+            fresh_for_creator = first_row.get("fresh_for_creator") or 0
+            avg_tier = first_row.get("avg_pool_performance_tier")
 
+            captions_by_type[content_type] = {
+                "captions": type_captions,
+                "pool_stats": {
+                    "total_available": total_available,
+                    "fresh_for_creator": fresh_for_creator,
+                    "returned_count": len(type_captions),
+                    "has_more": len(type_captions) < total_available,
+                    "avg_pool_performance_tier": round(avg_tier, 2) if avg_tier else None
+                }
+            }
+
+        # =====================================================================
+        # LAYER 7: Build metadata
+        # =====================================================================
+
+        def _compute_captions_hash(caption_ids):
+            if not caption_ids:
+                return "sha256:empty"
+            sorted_ids = sorted(caption_ids)
+            id_string = ",".join(str(cid) for cid in sorted_ids)
+            return f"sha256:{hashlib.sha256(id_string.encode()).hexdigest()[:16]}"
+
+        def _compute_content_types_hash(types):
+            if not types:
+                return "sha256:empty"
+            sorted_types = sorted(types)
+            type_string = ",".join(sorted_types)
+            return f"sha256:{hashlib.sha256(type_string.encode()).hexdigest()[:16]}"
+
+        query_ms = (time.perf_counter() - start_time) * 1000
+
+        types_with_captions = [t for t, data in captions_by_type.items() if data["captions"]]
+        types_without_captions = [t for t, data in captions_by_type.items() if not data["captions"]]
+
+        has_per_creator = any(
+            c.get("creator_last_used_at") is not None
+            for data in captions_by_type.values()
+            for c in data["captions"]
+        )
+        has_global_only = any(
+            c.get("creator_last_used_at") is None and c.get("last_used_at") is not None
+            for data in captions_by_type.values()
+            for c in data["captions"]
+        )
+
+        if has_per_creator and has_global_only:
+            freshness_source = "mixed"
+        elif has_per_creator:
+            freshness_source = "per_creator"
+        else:
+            freshness_source = "global_only"
+
+        total_captions = sum(len(data["captions"]) for data in captions_by_type.values())
+
+        metadata = {
+            "fetched_at": datetime.utcnow().isoformat() + "Z",
+            "query_ms": round(query_ms, 2),
+            "creator_resolved": resolved_creator_id,
+            "captions_hash": _compute_captions_hash(all_caption_ids),
+            "content_types_hash": _compute_content_types_hash(unique_content_types),
+            "caption_ids_returned": all_caption_ids,
+            "types_with_captions": len(types_with_captions),
+            "types_without_captions": len(types_without_captions),
+            "empty_types": types_without_captions,
+            "per_creator_data_available": has_per_creator,
+            "freshness_source": freshness_source,
+            "filters_applied": {
+                "content_types": unique_content_types,
+                "schedulable_type": schedulable_type,
+                "limit_per_type": limit_per_type
+            }
+        }
+
+        # =====================================================================
+        # LAYER 8: Return response
+        # =====================================================================
         return {
             "creator_id": creator_id,
-            "captions_by_type": results,
-            "total_captions": total,
-            "types_requested": len(content_types)
+            "captions_by_type": captions_by_type,
+            "total_captions": total_captions,
+            "types_requested": len(unique_content_types),
+            "metadata": metadata
         }
 
     except Exception as e:
         logger.error(f"get_batch_captions_by_content_types error: {e}")
-        return {"error": str(e), "captions_by_type": {}}
+        return _build_caption_error_response("DATABASE_ERROR", str(e), content_types)
 
 
 @mcp.tool()

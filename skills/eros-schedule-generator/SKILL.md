@@ -181,6 +181,47 @@ You have access to exactly 4 tools:
 | `mcp__eros-db__validate_caption_structure` | Check caption quality | Before using a caption |
 | `mcp__eros-db__get_send_types` | Fetch 22-type taxonomy | Reference if needed |
 
+### get_batch_captions_by_content_types Response Fields (v2.0)
+
+#### New Parameter
+- `schedulable_type`: Filter captions by type ('ppv', 'ppv_bump', 'wall', or null for all)
+
+#### Caption Fields
+| Field | Type | Description |
+|-------|------|-------------|
+| `performance_tier` | int | Raw tier (1=best, 4=worst) |
+| `tier_label` | string | Human-readable: ELITE/PROVEN/STANDARD/UNPROVEN |
+| `quality_score` | int | 0-100, higher=better (inverse of tier) |
+| `creator_last_used_at` | string\|null | When this creator last used caption |
+| `creator_use_count` | int | How many times this creator used caption |
+| `days_since_creator_used` | int\|null | Days since creator used (null=never) |
+| `effectively_fresh` | bool | True if never used or >90 days old |
+
+#### Pricing Object
+| Field | Type | Description |
+|-------|------|-------------|
+| `suggested_price` | float\|null | Recommended price based on history |
+| `price_range_min` | float | Minimum viable price ($5.00 default) |
+| `price_range_max` | float | Maximum viable price ($50.00 default) |
+| `avg_purchase_rate` | float | Historical conversion rate |
+| `has_price_history` | bool | True if pricing data available |
+
+#### Pool Stats (per content type)
+| Field | Type | Description |
+|-------|------|-------------|
+| `total_available` | int | Total captions in pool for this type |
+| `fresh_for_creator` | int | Captions never used by this creator |
+| `returned_count` | int | Captions returned in this response |
+| `has_more` | bool | True if more captions available |
+| `avg_pool_performance_tier` | float | Average tier of entire pool |
+
+#### Metadata Block
+| Field | Type | Description |
+|-------|------|-------------|
+| `captions_hash` | string | SHA256 hash of caption IDs (for validation) |
+| `freshness_source` | string | "per_creator", "global_only", or "mixed" |
+| `per_creator_data_available` | bool | True if any per-creator data exists |
+
 ---
 
 ## When to Load REFERENCE Files
