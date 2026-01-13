@@ -2901,6 +2901,35 @@ def _build_caption_error_response(
     }
 
 
+def _build_send_type_error_response(
+    error_code: str,
+    error_message: str,
+    send_type: str
+) -> dict:
+    """Build consistent error response for send_type caption retrieval."""
+    return {
+        "error": error_message,
+        "error_code": error_code,
+        "creator_id": None,
+        "resolved_creator_id": None,
+        "send_type": send_type,
+        "captions": [],
+        "count": 0,
+        "pool_stats": {
+            "total_available": 0,
+            "fresh_for_creator": 0,
+            "returned_count": 0,
+            "has_more": False,
+            "avg_pool_performance_tier": None,
+            "freshness_ratio": None
+        },
+        "metadata": {
+            "fetched_at": datetime.utcnow().isoformat() + "Z",
+            "error": True
+        }
+    }
+
+
 @mcp.tool()
 def get_batch_captions_by_content_types(
     creator_id: str,
@@ -3244,68 +3273,230 @@ def get_batch_captions_by_content_types(
 
 @mcp.tool()
 def get_send_type_captions(creator_id: str, send_type: str, limit: int = 10) -> dict:
-    """Retrieves captions compatible with a specific send type.
+    """Retrieves captions for a specific send type with per-creator freshness filtering.
 
     MCP Name: mcp__eros-db__get_send_type_captions
+    Version: 2.0.0
 
     Args:
-        creator_id: Creator identifier
-        send_type: Send type key (e.g., 'ppv_unlock', 'bump_normal')
-        limit: Maximum captions to return (max 50)
+        creator_id: Creator identifier (required for per-creator freshness)
+        send_type: Send type key from send_types table (e.g., 'ppv_unlock', 'bump_normal')
+        limit: Maximum captions to return (clamped 1-50, default 10)
 
     Returns:
-        List of compatible captions
+        Dict with captions (including freshness fields), pool_stats, and metadata.
+
+    Response Schema:
+        {
+            "creator_id": str,           # Original input
+            "resolved_creator_id": str,  # Resolved PK from creators table
+            "send_type": str,
+            "captions": [                # Ordered by freshness -> performance
+                {
+                    "caption_id": int,
+                    "caption_text": str,
+                    "category": str,     # Same as send_type (caption_type column)
+                    "performance_tier": int,
+                    "content_type_id": int,
+                    "global_last_used_at": str|null,
+                    "creator_last_used_at": str|null,
+                    "creator_use_count": int,
+                    "days_since_creator_used": int|null,
+                    "effectively_fresh": int  # 1=fresh, 0=stale
+                }
+            ],
+            "count": int,
+            "pool_stats": {
+                "total_available": int,
+                "fresh_for_creator": int,
+                "returned_count": int,
+                "has_more": bool,
+                "avg_pool_performance_tier": float|null,
+                "freshness_ratio": float|null
+            },
+            "metadata": {
+                "fetched_at": str,       # ISO timestamp
+                "query_ms": float,
+                "tool_version": str,
+                "freshness_threshold_days": int
+            }
+        }
+
+    Example:
+        get_send_type_captions(
+            creator_id="alexia",
+            send_type="bump_normal",
+            limit=5
+        )
     """
     logger.info(f"get_send_type_captions: creator_id={creator_id}, send_type={send_type}")
+
+    # =========================================================================
+    # LAYER 1: Type validation
+    # =========================================================================
+    if not creator_id or not isinstance(creator_id, str):
+        return _build_send_type_error_response(
+            "INVALID_CREATOR_ID",
+            "creator_id must be a non-empty string",
+            send_type if isinstance(send_type, str) else ""
+        )
+
+    if not send_type or not isinstance(send_type, str):
+        return _build_send_type_error_response(
+            "INVALID_SEND_TYPE",
+            "send_type must be a non-empty string",
+            send_type if isinstance(send_type, str) else ""
+        )
+
+    # =========================================================================
+    # LAYER 2: Format validation
+    # =========================================================================
+    is_valid, validation_result = validate_creator_id(creator_id)
+    if not is_valid:
+        return _build_send_type_error_response(
+            "INVALID_CREATOR_ID_FORMAT",
+            validation_result,
+            send_type
+        )
+
+    if len(send_type) > 50 or not send_type.replace('_', '').isalnum():
+        return _build_send_type_error_response(
+            "INVALID_SEND_TYPE_FORMAT",
+            "send_type must be alphanumeric with underscores, max 50 chars",
+            send_type
+        )
+
+    # =========================================================================
+    # LAYER 3: Resolution
+    # =========================================================================
+    resolved = resolve_creator_id(creator_id)
+    if not resolved["found"]:
+        return _build_send_type_error_response(
+            "CREATOR_NOT_FOUND",
+            f"Creator not found: {creator_id}",
+            send_type
+        )
+    resolved_creator_id = resolved["creator_id"]
+
+    # Validate send_type exists in send_types table
+    send_type_check = db_query(
+        "SELECT 1 FROM send_types WHERE send_type_key = ? AND is_active = 1 LIMIT 1",
+        (send_type,)
+    )
+    if not send_type_check:
+        valid_types = db_query(
+            "SELECT send_type_key FROM send_types WHERE is_active = 1 ORDER BY sort_order LIMIT 30"
+        )
+        valid_list = [r["send_type_key"] for r in valid_types]
+        return _build_send_type_error_response(
+            "SEND_TYPE_NOT_FOUND",
+            f"send_type '{send_type}' not found. Valid types: {', '.join(valid_list[:10])}...",
+            send_type
+        )
+
+    # =========================================================================
+    # LAYER 4: Normalize
+    # =========================================================================
+    limit = max(1, min(50, limit))
+
     try:
-        limit = min(max(1, limit), 50)
+        start_time = time.perf_counter()
 
-        # Map send types to caption categories (for fallback only)
-        category_map = {
-            'ppv_unlock': 'ppv',
-            'ppv_wall': 'ppv',
-            'ppv_followup': 'followup',
-            'bump_normal': 'bump',
-            'bump_descriptive': 'bump',
-            'bump_text_only': 'bump',
-            'bump_flyer': 'bump',
-            'tip_goal': 'tip',
-            'renew_on_post': 'renewal',
-            'renew_on_message': 'renewal',
-            'expired_winback': 'winback',
-            'link_drop': 'promo',
-            'dm_farm': 'engagement'
+        # Calculate freshness threshold (90 days = effectively fresh)
+        from datetime import date, timedelta
+        freshness_threshold = (date.today() - timedelta(days=90)).isoformat()
+
+        # Get pool statistics first
+        pool_stats_result = db_query("""
+            SELECT
+                COUNT(*) as total_available,
+                SUM(CASE
+                    WHEN ccp.last_used_date IS NULL THEN 1
+                    WHEN ccp.last_used_date < ? THEN 1
+                    ELSE 0
+                END) as fresh_for_creator,
+                AVG(cb.performance_tier) as avg_pool_performance_tier
+            FROM caption_bank cb
+            LEFT JOIN caption_creator_performance ccp
+                ON cb.caption_id = ccp.caption_id
+                AND ccp.creator_id = ?
+            WHERE cb.caption_type = ?
+            AND cb.is_active = 1
+        """, (freshness_threshold, resolved_creator_id, send_type))
+
+        pool = pool_stats_result[0] if pool_stats_result else {
+            "total_available": 0, "fresh_for_creator": 0, "avg_pool_performance_tier": None
         }
-        category = category_map.get(send_type, 'general')
 
-        # Query caption_bank (actual table name)
-        # Priority: 1) Exact send_type match, 2) Category fallback, 3) General captions
+        # Get captions with freshness fields - exact send_type match only
+        # Note: Category fallback removed in v2.0.0 - data shows caption_type
+        # stores send_type_keys directly, not generic categories
         captions = db_query("""
-            SELECT caption_id, caption_text, caption_type as category,
-                   performance_tier as quality_score, content_type_id,
-                   global_last_used_date as last_used_at
-            FROM caption_bank
-            WHERE (caption_type = ? OR caption_type = ? OR caption_type = 'general')
-            AND is_active = 1
+            SELECT
+                cb.caption_id,
+                cb.caption_text,
+                cb.caption_type as category,
+                cb.performance_tier,
+                cb.content_type_id,
+                cb.global_last_used_date as global_last_used_at,
+                ccp.last_used_date as creator_last_used_at,
+                COALESCE(ccp.times_used, 0) as creator_use_count,
+                CASE
+                    WHEN ccp.last_used_date IS NULL THEN NULL
+                    ELSE CAST(julianday('now') - julianday(ccp.last_used_date) AS INTEGER)
+                END as days_since_creator_used,
+                CASE
+                    WHEN ccp.last_used_date IS NULL THEN 1
+                    WHEN ccp.last_used_date < ? THEN 1
+                    ELSE 0
+                END as effectively_fresh
+            FROM caption_bank cb
+            LEFT JOIN caption_creator_performance ccp
+                ON cb.caption_id = ccp.caption_id
+                AND ccp.creator_id = ?
+            WHERE cb.caption_type = ?
+            AND cb.is_active = 1
             ORDER BY
-                CASE WHEN caption_type = ? THEN 0
-                     WHEN caption_type = ? THEN 1
-                     ELSE 2 END,
-                performance_tier ASC
+                effectively_fresh DESC,
+                ccp.last_used_date ASC NULLS FIRST,
+                cb.performance_tier ASC,
+                cb.global_last_used_date ASC NULLS FIRST
             LIMIT ?
-        """, (send_type, category, send_type, category, limit))
+        """, (freshness_threshold, resolved_creator_id, send_type, limit))
+
+        # Log warning if no captions found for monitoring
+        if not captions:
+            logger.warning(f"No captions found for send_type={send_type}, creator={resolved_creator_id}")
+
+        query_ms = (time.perf_counter() - start_time) * 1000
+        total_available = pool.get("total_available", 0) or 0
+        fresh_for_creator = pool.get("fresh_for_creator", 0) or 0
 
         return {
             "creator_id": creator_id,
+            "resolved_creator_id": resolved_creator_id,
             "send_type": send_type,
-            "category_matched": category,
             "captions": captions,
-            "count": len(captions)
+            "count": len(captions),
+            "pool_stats": {
+                "total_available": total_available,
+                "fresh_for_creator": fresh_for_creator,
+                "returned_count": len(captions),
+                "has_more": total_available > len(captions),
+                "avg_pool_performance_tier": pool.get("avg_pool_performance_tier"),
+                "freshness_ratio": round(fresh_for_creator / total_available, 3) if total_available > 0 else None
+            },
+            "metadata": {
+                "fetched_at": datetime.utcnow().isoformat() + "Z",
+                "query_ms": round(query_ms, 2),
+                "tool_version": "2.0.0",
+                "freshness_threshold_days": 90
+            }
         }
 
     except Exception as e:
         logger.error(f"get_send_type_captions error: {e}")
-        return {"error": str(e), "captions": []}
+        return _build_send_type_error_response("DATABASE_ERROR", str(e), send_type)
 
 
 @mcp.tool()
