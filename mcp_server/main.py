@@ -3511,6 +3511,25 @@ def get_send_type_captions(creator_id: str, send_type: str, limit: int = 10) -> 
 # Extended in v2.0 to include constraint fields for get_send_types_constraints
 _SEND_TYPES_CACHE: dict[str, dict] = {}
 _SEND_TYPES_CACHE_META: dict[str, str] = {}  # cached_at, types_hash
+_SEND_TYPES_FULL_CACHE: dict[str, dict] = {}  # v2.0: 48-column cache for get_send_types
+
+# Column list for full send_types (excludes internal lifecycle fields)
+_SEND_TYPES_FULL_COLUMNS = """
+    send_type_id, send_type_key, display_name, category, page_type_restriction,
+    description, purpose, strategy,
+    requires_media, requires_flyer, requires_price, requires_link, has_expiration,
+    default_expiration_hours, can_have_followup, followup_delay_minutes,
+    caption_length, emoji_recommendation,
+    max_per_day, max_per_week, min_hours_between, sort_order, is_active,
+    priority_score, allocation_weight, fatigue_score, fatigue_multiplier,
+    revenue_weight, engagement_weight, retention_weight,
+    cooldown_category, cooldown_after_engagement_min, cooldown_after_revenue_min,
+    audience_segment, ab_test_eligible, current_experiment_id, min_subscriber_tenure_days,
+    primary_channel_key, secondary_channel_key, primary_channel_weight,
+    wall_delivery_page_type, wall_content_level, supports_link_drop_promo,
+    channel_distribution, hybrid_split, page_type_lock,
+    drip_window_allowed, drip_window_triggers
+"""
 
 
 def _get_send_types_cache() -> dict[str, dict]:
@@ -3554,6 +3573,34 @@ def _get_send_types_cache_meta() -> dict[str, str]:
 def _is_send_types_cache_populated() -> bool:
     """Check if cache was already populated (for source detection)."""
     return bool(_SEND_TYPES_CACHE)
+
+
+def _get_send_types_full_cache() -> dict[str, dict]:
+    """
+    Lazy-load full 48-column cache on first get_send_types() call.
+
+    Separate from _SEND_TYPES_CACHE to avoid bloating memory for
+    get_send_types_constraints calls which only need 9 fields.
+
+    Returns:
+        dict keyed by send_type_key with 48 business-relevant columns.
+    """
+    global _SEND_TYPES_FULL_CACHE
+    if not _SEND_TYPES_FULL_CACHE:
+        query = f"""
+            SELECT {_SEND_TYPES_FULL_COLUMNS}
+            FROM send_types WHERE is_active = 1
+            ORDER BY category, sort_order
+        """
+        rows = db_query(query, ())
+        _SEND_TYPES_FULL_CACHE = {r["send_type_key"]: dict(r) for r in rows}
+        logger.info(f"Loaded {len(_SEND_TYPES_FULL_CACHE)} full send_types into cache")
+    return _SEND_TYPES_FULL_CACHE
+
+
+def _is_send_types_full_cache_populated() -> bool:
+    """Check if full cache was already populated (for source detection)."""
+    return bool(_SEND_TYPES_FULL_CACHE)
 
 
 def _validate_send_type(send_type: str) -> tuple[bool, dict | None, str | None]:
