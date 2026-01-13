@@ -4019,31 +4019,94 @@ def get_send_types_constraints(page_type: str = None) -> dict:
 
 @mcp.tool()
 def get_send_types(page_type: str = None) -> dict:
-    """Returns the send type taxonomy with constraints.
+    """Returns full send type taxonomy with all business-relevant fields.
 
     MCP Name: mcp__eros-db__get_send_types
+    Version: 2.0.0
+
+    This is the FULL REFERENCE tool returning 48 business-relevant columns.
+    Use get_send_types_constraints() for lightweight schedule generation (9 fields).
+
+    BREAKING CHANGE v2.0: Removed redundant 'send_types' flat array.
+    Use by_category for grouped access or all_send_type_keys for key list.
 
     Args:
-        page_type: Optional filter ('paid' or 'free')
+        page_type: Optional filter ('paid', 'free', or None for all).
+                   Case-insensitive: 'PAID', 'Paid', 'paid' all work.
+                   Invalid values return error with INVALID_PAGE_TYPE code.
 
     Returns:
-        List of send types with constraints
+        Dict with send types grouped by category and full field set.
+
+    Response Schema:
+        {
+            "by_category": {
+                "revenue": [{...48 fields...}, ...],
+                "engagement": [{...48 fields...}, ...],
+                "retention": [{...48 fields...}, ...]
+            },
+            "all_send_type_keys": ["ppv_unlock", "bump_normal", ...],
+            "counts": {"revenue": 9, "engagement": 9, "retention": 4, "total": 22},
+            "page_type_filter": "paid" | "free" | null,
+            "metadata": {
+                "fetched_at": "ISO timestamp",
+                "tool_version": "2.0.0",
+                "source": "cache" | "database",
+                "cached_at": "ISO timestamp" | null,
+                "types_hash": "12-char hash for ValidationCertificate"
+            }
+        }
+
+    Error Response:
+        Same schema with error/error_code fields and empty by_category.
+        Error codes: INVALID_PAGE_TYPE, INTERNAL_ERROR
+
+    Excluded Columns (internal lifecycle):
+        schema_version, created_at, updated_at, deprecated_at, replacement_send_type_id
+
+    Example:
+        get_send_types(page_type="paid")
+        # Returns full details for paid pages (excludes free-only types)
     """
     logger.info(f"get_send_types: page_type={page_type}")
+
     try:
-        query = "SELECT * FROM send_types WHERE is_active = 1"
-        params = []
+        # =========================================================================
+        # INPUT VALIDATION: Case-normalize, then fail-fast on invalid
+        # =========================================================================
+        original_page_type = page_type
+        if page_type is not None:
+            page_type = str(page_type).lower().strip()
+            if page_type not in ('paid', 'free'):
+                return _build_send_types_error_response(
+                    error_code="INVALID_PAGE_TYPE",
+                    error_message=f"Invalid page_type: '{original_page_type}'. Valid values: 'paid', 'free', or null",
+                    page_type_filter=original_page_type
+                )
 
+        # =========================================================================
+        # FETCH FROM CACHE (lazy-load full cache on first call)
+        # =========================================================================
+        cache_hit = _is_send_types_full_cache_populated()
+        cache = _get_send_types_full_cache()
+        cache_meta = _get_send_types_cache_meta()  # Reuse constraint cache metadata for hash
+
+        # Convert cache dict to ordered list
+        all_types = list(cache.values())
+
+        # =========================================================================
+        # FILTER BY PAGE TYPE
+        # =========================================================================
         if page_type == 'free':
-            query += " AND page_type_restriction IN ('both', 'free')"
+            types = [t for t in all_types if t['page_type_restriction'] in ('both', 'free')]
         elif page_type == 'paid':
-            query += " AND page_type_restriction IN ('both', 'paid')"
+            types = [t for t in all_types if t['page_type_restriction'] in ('both', 'paid')]
+        else:
+            types = all_types
 
-        query += " ORDER BY category, sort_order"
-
-        types = db_query(query, tuple(params))
-
-        # Group by category
+        # =========================================================================
+        # GROUP BY CATEGORY
+        # =========================================================================
         by_category = {
             "revenue": [],
             "engagement": [],
@@ -4054,16 +4117,37 @@ def get_send_types(page_type: str = None) -> dict:
             if cat in by_category:
                 by_category[cat].append(t)
 
+        # =========================================================================
+        # BUILD RESPONSE
+        # =========================================================================
+        all_keys = [t['send_type_key'] for t in types]
+
         return {
-            "send_types": types,
             "by_category": by_category,
-            "total": len(types),
-            "page_type_filter": page_type
+            "all_send_type_keys": all_keys,
+            "counts": {
+                "revenue": len(by_category["revenue"]),
+                "engagement": len(by_category["engagement"]),
+                "retention": len(by_category["retention"]),
+                "total": len(types)
+            },
+            "page_type_filter": page_type,
+            "metadata": {
+                "fetched_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                "tool_version": "2.0.0",
+                "source": "cache" if cache_hit else "database",
+                "cached_at": cache_meta.get("cached_at") if cache_hit else None,
+                "types_hash": cache_meta.get("types_hash")
+            }
         }
 
     except Exception as e:
         logger.error(f"get_send_types error: {e}")
-        return {"error": str(e), "send_types": []}
+        return _build_send_types_error_response(
+            error_code="INTERNAL_ERROR",
+            error_message=str(e),
+            page_type_filter=page_type
+        )
 
 
 # ============================================================
