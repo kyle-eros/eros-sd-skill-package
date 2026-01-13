@@ -196,6 +196,7 @@ class TestInputValidation:
         assert 'invalid_value' in result['error']
         assert result['by_category'] == {"revenue": [], "engagement": [], "retention": []}
         assert result['counts']['total'] == 0
+        assert result['valid_values'] == ['paid', 'free', None]
 
 
 class TestResponseSchema:
