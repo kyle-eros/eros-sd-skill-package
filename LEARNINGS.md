@@ -1,6 +1,6 @@
 # EROS Self-Improving Skills - Learning Accumulation
 
-**Version**: 1.1.0 | **Last Updated**: 2026-01-12 | **Total Learnings**: 0
+**Version**: 1.2.0 | **Last Updated**: 2026-01-12 | **Total Learnings**: 4
 
 ---
 
@@ -17,10 +17,10 @@
 ## Statistics
 
 ```yaml
-by_confidence: { high: 0, medium: 0, low: 0 }
-by_source: { validation: 0, user: 0, performance: 0 }
-by_scope: { all_creators: 0, tier_specific: 0, creator_specific: 0 }
-last_7_days: { added: 0, promoted: 0, deprecated: 0 }
+by_confidence: { high: 0, medium: 1, low: 3 }
+by_source: { validation: 0, user: 1, performance: 0, refactor: 3 }
+by_scope: { all_creators: 4, tier_specific: 0, creator_specific: 0 }
+last_7_days: { added: 3, promoted: 0, deprecated: 0 }
 ```
 
 ---
@@ -44,6 +44,13 @@ last_7_days: { added: 0, promoted: 0, deprecated: 0 }
 
 > SHOULD follow - Patterns from quality >= 85 schedules and user approvals
 
+### [2026-01-12] Trigger Merge Strategy: Field-by-Field, Not Winner-Takes-All
+**Pattern**: When DB triggers and runtime detections conflict on same (creator, content_type, trigger_type)
+**Insight**: Different fields have different freshness requirements - adjustment_multiplier from runtime (fresher), confidence uses MAX (ratchets up), first_detected_at from DB (preserved)
+**Source**: user | **Interview**: save_volume_triggers refactoring
+**Applies To**: all
+**Implementation**: `_merge_triggers()` function in preflight should use field-by-field rules, not simple source precedence
+
 <!-- Entry Template:
 ### [YYYY-MM-DD] Title
 **Pattern**: What was observed | **Insight**: Why it works
@@ -64,6 +71,20 @@ last_7_days: { added: 0, promoted: 0, deprecated: 0 }
 **Source**: refactor | **Sample Size**: 1
 **Applies To**: all
 **Promote When**: Similar schema issues found in other MCP tools
+
+### [2026-01-12] Detection Counter Pattern Over Soft-Delete for Trigger History
+**Observation**: Soft-delete chains (is_active=0 + superseded_by) cause row proliferation and complex queries
+**Hypothesis**: Detection counter (detection_count++) with first_detected_at preservation provides simpler history tracking
+**Source**: refactor | **Sample Size**: 1
+**Applies To**: all
+**Promote When**: Pattern validated in production for 2+ weeks
+
+### [2026-01-12] ON CONFLICT DO UPDATE Preserves IDs, INSERT OR REPLACE Destroys Them
+**Observation**: INSERT OR REPLACE deletes then inserts, generating new AUTO_INCREMENT IDs. ON CONFLICT modifies in place.
+**Hypothesis**: Preserving trigger_id across re-detections enables better audit trails and consumer tracking
+**Source**: refactor | **Sample Size**: 1
+**Applies To**: all
+**Promote When**: Other MCP write tools confirm pattern value
 
 <!-- Entry Template:
 ### [YYYY-MM-DD] Title
@@ -89,6 +110,9 @@ last_7_days: { added: 0, promoted: 0, deprecated: 0 }
 
 | Date | Action | Learning | Confidence | Source |
 |------|--------|----------|------------|--------|
+| 2026-01-12 | ADDED | ON CONFLICT vs INSERT OR REPLACE | LOW | refactor |
+| 2026-01-12 | ADDED | Detection Counter Over Soft-Delete | LOW | refactor |
+| 2026-01-12 | ADDED | Trigger Merge Strategy Field-by-Field | MEDIUM | user |
 | 2026-01-12 | CLEANED | Removed 47 test-generated entries | - | refactor |
 | 2026-01-12 | ADDED | save_schedule v2.0.0 Schema Alignment | LOW | refactor |
 | 2026-01-06 | CREATED | Initial structure | - | system |
