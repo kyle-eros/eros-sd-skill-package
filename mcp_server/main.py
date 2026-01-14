@@ -2558,6 +2558,328 @@ def save_schedule(
 
 
 @mcp.tool()
+def get_schedules(
+    creator_id: str = None,
+    week_start: str = None,
+    status: str = None,
+    limit: int = 50,
+    offset: int = 0,
+    include_items: bool = False,
+    sort_by: str = "generated_at",
+    sort_order: str = "desc"
+) -> dict:
+    """Retrieves saved schedules from the database with filtering and pagination.
+
+    MCP Name: mcp__eros-db__get_schedules
+    Version: 2.0.0
+
+    This is the READ counterpart to save_schedule. Retrieves schedules from
+    schedule_templates with optional filtering by creator, week, and status.
+
+    Args:
+        creator_id: Optional creator filter (creator_id UUID or page_name)
+        week_start: Optional week filter in YYYY-MM-DD format
+        status: Optional status filter (draft, approved, queued, completed)
+        limit: Maximum results to return (clamped 1-500, default 50)
+        offset: Pagination offset for large result sets (default 0)
+        include_items: Include full schedule items from generation_metadata (default False)
+        sort_by: Sort field - "generated_at", "week_start", "status" (default "generated_at")
+        sort_order: Sort direction - "asc" or "desc" (default "desc")
+
+    Returns:
+        Success response:
+        {
+            "schedules": [
+                {
+                    "schedule_id": int,
+                    "creator_id": str,
+                    "creator_page_name": str,
+                    "week_start": str,
+                    "week_end": str,
+                    "status": str,
+                    "total_items": int,
+                    "total_ppvs": int,
+                    "total_bumps": int,
+                    "projected_earnings": float | None,
+                    "actual_earnings": float | None,
+                    "completion_rate": float | None,
+                    "quality_validation_score": float | None,
+                    "health_status": str,
+                    "generated_at": str,
+                    "items": list | None  # Only if include_items=True
+                }
+            ],
+            "count": int,
+            "total_count": int,
+            "limit": int,
+            "offset": int,
+            "has_more": bool,
+            "metadata": {
+                "fetched_at": str,
+                "tool_version": str,
+                "execution_ms": float,
+                "filters_applied": {...},
+                "sort": {"by": str, "order": str}
+            }
+        }
+
+        Error response:
+        {
+            "error": str,
+            "error_code": str,
+            "schedules": [],
+            "count": 0,
+            "total_count": 0,
+            "metadata": {"fetched_at": str, "error": True}
+        }
+
+    Error Codes:
+        - INVALID_CREATOR: creator_id provided but not found
+        - INVALID_DATE: week_start not in YYYY-MM-DD format
+        - INVALID_STATUS: status not one of draft/approved/queued/completed
+        - INVALID_SORT_FIELD: sort_by not one of allowed fields
+        - INVALID_SORT_ORDER: sort_order not asc or desc
+        - DATABASE_ERROR: SQLite operation failed
+    """
+    import time
+    from datetime import datetime
+
+    start_time = time.time()
+    fetched_at = datetime.now().isoformat() + "Z"
+
+    logger.info(f"get_schedules: creator_id={creator_id}, week_start={week_start}, "
+                f"status={status}, limit={limit}, offset={offset}, include_items={include_items}")
+
+    # Valid values for validation
+    VALID_STATUSES = ("draft", "approved", "queued", "completed")
+    VALID_SORT_FIELDS = ("generated_at", "week_start", "status")
+    VALID_SORT_ORDERS = ("asc", "desc")
+
+    # ==========================================================================
+    # Input Validation
+    # ==========================================================================
+
+    # Validate and clamp limit
+    try:
+        limit = int(limit)
+        limit = max(1, min(500, limit))
+    except (ValueError, TypeError):
+        limit = 50
+
+    # Validate offset
+    try:
+        offset = int(offset)
+        offset = max(0, offset)
+    except (ValueError, TypeError):
+        offset = 0
+
+    # Validate status if provided
+    if status is not None:
+        status_lower = str(status).lower().strip()
+        if status_lower not in VALID_STATUSES:
+            return {
+                "error": f"Invalid status: '{status}'. Must be one of: {', '.join(VALID_STATUSES)}",
+                "error_code": "INVALID_STATUS",
+                "schedules": [],
+                "count": 0,
+                "total_count": 0,
+                "metadata": {"fetched_at": fetched_at, "error": True}
+            }
+        status = status_lower
+
+    # Validate week_start format if provided
+    if week_start is not None:
+        try:
+            datetime.strptime(week_start, "%Y-%m-%d")
+        except (ValueError, TypeError):
+            return {
+                "error": f"Invalid week_start format: '{week_start}'. Must be YYYY-MM-DD",
+                "error_code": "INVALID_DATE",
+                "schedules": [],
+                "count": 0,
+                "total_count": 0,
+                "metadata": {"fetched_at": fetched_at, "error": True}
+            }
+
+    # Validate sort_by
+    sort_by_lower = str(sort_by).lower().strip() if sort_by else "generated_at"
+    if sort_by_lower not in VALID_SORT_FIELDS:
+        return {
+            "error": f"Invalid sort_by: '{sort_by}'. Must be one of: {', '.join(VALID_SORT_FIELDS)}",
+            "error_code": "INVALID_SORT_FIELD",
+            "schedules": [],
+            "count": 0,
+            "total_count": 0,
+            "metadata": {"fetched_at": fetched_at, "error": True}
+        }
+    sort_by = sort_by_lower
+
+    # Validate sort_order
+    sort_order_lower = str(sort_order).lower().strip() if sort_order else "desc"
+    if sort_order_lower not in VALID_SORT_ORDERS:
+        return {
+            "error": f"Invalid sort_order: '{sort_order}'. Must be 'asc' or 'desc'",
+            "error_code": "INVALID_SORT_ORDER",
+            "schedules": [],
+            "count": 0,
+            "total_count": 0,
+            "metadata": {"fetched_at": fetched_at, "error": True}
+        }
+    sort_order = sort_order_lower
+
+    # Resolve creator_id if provided
+    creator_pk = None
+    if creator_id is not None and str(creator_id).strip():
+        resolved = resolve_creator_id(creator_id)
+        if not resolved.get("found"):
+            return {
+                "error": f"Creator not found: '{creator_id}'",
+                "error_code": "INVALID_CREATOR",
+                "schedules": [],
+                "count": 0,
+                "total_count": 0,
+                "metadata": {"fetched_at": fetched_at, "error": True}
+            }
+        creator_pk = resolved["creator_id"]
+
+    # ==========================================================================
+    # Database Query
+    # ==========================================================================
+
+    try:
+        with get_db_connection() as conn:
+            # Build WHERE clause dynamically
+            where_clauses = []
+            params = []
+
+            if creator_pk is not None:
+                where_clauses.append("st.creator_id = ?")
+                params.append(creator_pk)
+
+            if week_start is not None:
+                where_clauses.append("st.week_start = ?")
+                params.append(week_start)
+
+            if status is not None:
+                where_clauses.append("st.status = ?")
+                params.append(status)
+
+            where_sql = " AND ".join(where_clauses) if where_clauses else "1=1"
+
+            # Get total count for pagination
+            count_sql = f"""
+                SELECT COUNT(*) FROM schedule_templates st
+                WHERE {where_sql}
+            """
+            total_count = conn.execute(count_sql, params).fetchone()[0]
+
+            # Build main query with sorting and pagination
+            # Map sort_by to actual column (st prefix for schedule_templates)
+            sort_column = f"st.{sort_by}"
+            order_direction = sort_order.upper()
+
+            main_sql = f"""
+                SELECT
+                    st.template_id,
+                    st.creator_id,
+                    c.page_name,
+                    st.week_start,
+                    st.week_end,
+                    st.status,
+                    st.total_items,
+                    st.total_ppvs,
+                    st.total_bumps,
+                    st.projected_earnings,
+                    st.actual_earnings,
+                    st.completion_rate,
+                    st.quality_validation_score,
+                    st.health_status,
+                    st.generated_at,
+                    st.generation_metadata
+                FROM schedule_templates st
+                LEFT JOIN creators c ON st.creator_id = c.creator_id
+                WHERE {where_sql}
+                ORDER BY {sort_column} {order_direction}
+                LIMIT ? OFFSET ?
+            """
+
+            params.extend([limit, offset])
+            rows = conn.execute(main_sql, params).fetchall()
+
+            # Build response schedules
+            schedules = []
+            for row in rows:
+                schedule = {
+                    "schedule_id": row[0],
+                    "creator_id": row[1],
+                    "creator_page_name": row[2],
+                    "week_start": row[3],
+                    "week_end": row[4],
+                    "status": row[5],
+                    "total_items": row[6] or 0,
+                    "total_ppvs": row[7] or 0,
+                    "total_bumps": row[8] or 0,
+                    "projected_earnings": row[9],
+                    "actual_earnings": row[10],
+                    "completion_rate": row[11],
+                    "quality_validation_score": row[12],
+                    "health_status": row[13] or "HEALTHY",
+                    "generated_at": row[14]
+                }
+
+                # Include items if requested
+                if include_items:
+                    items = None
+                    metadata_raw = row[15]
+                    if metadata_raw:
+                        try:
+                            metadata = json.loads(metadata_raw) if isinstance(metadata_raw, str) else metadata_raw
+                            items = metadata.get("items")
+                        except (json.JSONDecodeError, TypeError):
+                            logger.warning(f"Failed to parse generation_metadata for schedule {row[0]}")
+                            items = None
+                    schedule["items"] = items
+
+                schedules.append(schedule)
+
+            execution_ms = (time.time() - start_time) * 1000
+
+            return {
+                "schedules": schedules,
+                "count": len(schedules),
+                "total_count": total_count,
+                "limit": limit,
+                "offset": offset,
+                "has_more": (offset + len(schedules)) < total_count,
+                "metadata": {
+                    "fetched_at": fetched_at,
+                    "tool_version": "2.0.0",
+                    "execution_ms": round(execution_ms, 2),
+                    "filters_applied": {
+                        "creator_id": creator_id,
+                        "week_start": week_start,
+                        "status": status
+                    },
+                    "sort": {
+                        "by": sort_by,
+                        "order": sort_order
+                    }
+                }
+            }
+
+    except Exception as e:
+        logger.error(f"get_schedules error: {e}")
+        return {
+            "error": f"Database error: {str(e)}",
+            "error_code": "DATABASE_ERROR",
+            "schedules": [],
+            "count": 0,
+            "total_count": 0,
+            "metadata": {"fetched_at": fetched_at, "error": True}
+        }
+
+
+@mcp.tool()
 def save_volume_triggers(creator_id: str, triggers: list) -> dict:
     """Persists detected volume triggers with validation and detection tracking.
 
