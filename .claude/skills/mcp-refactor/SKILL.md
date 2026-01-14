@@ -41,7 +41,7 @@ The Ralph Wiggum method keeps Claude running in a continuous loop until tasks ar
 1. Use `AskUserQuestionTool` to gather specification details
 2. Ask probing, non-obvious questions—avoid surface-level queries Claude could infer
 3. Cover edge cases, error handling, input/output formats, and integration points
-4. Continue interviewing until all ambiguities are resolved
+4. be very in-depth and continue interviewing me continually until it’s complete
 5. Generate `[tool_name].md` spec file upon completion
 6. Replace existing `fixes.md` with finalized version
 

@@ -1,5 +1,13 @@
 # EROS Schedule Generator
 
+## CRITICAL COMMAND RULES (MUST FOLLOW)
+
+**Python Command**: ALWAYS use `python3` instead of `python`. The `python` command does NOT exist on this macOS system.
+- CORRECT: `python3 script.py`, `python3 -c "..."`, `python3 -m pytest`
+- WRONG: `python script.py`, `python -c "..."`, `python -m pytest`
+
+---
+
 ## Project Overview
 
 Multi-agent skill package for generating optimized OnlyFans creator schedules. Uses a 3-phase pipeline architecture with MCP database integration.
